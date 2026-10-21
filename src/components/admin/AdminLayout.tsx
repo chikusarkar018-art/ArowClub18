@@ -109,6 +109,16 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
       icon: LayoutDashboard,
     },
     {
+      id: 'support_desk',
+      label: 'Customer Care Chat',
+      fullLabel: 'Live Customer Care Chat',
+      icon: MessageSquare,
+      countBadge: (liveCounts.escalatedTickets > 0 || liveCounts.openTickets > 0) ? (liveCounts.escalatedTickets || liveCounts.openTickets) : undefined,
+      highlightBorder: liveCounts.escalatedTickets > 0,
+      badge: liveCounts.escalatedTickets > 0 ? 'USER WAITING' : (liveCounts.openTickets > 0 ? 'LIVE' : undefined),
+      badgeType: 'yellow',
+    },
+    {
       id: 'google_sheet_ledger',
       label: 'Google Sheet Ledger',
       icon: FileSpreadsheet,
@@ -476,7 +486,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
             <Search className="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
             <input
               type="text"
-              placeholder="Search here..."
+              placeholder="Search e.g. Dashboard..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full bg-[#141829] border border-[#23273c] text-xs text-white placeholder-slate-400 rounded-xl pl-9 pr-4 py-2 focus:outline-none focus:border-indigo-500 transition shadow-inner"
@@ -508,6 +518,19 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
               className="p-2 rounded-xl bg-[#141829] border border-[#23273c] text-slate-400 hover:text-white hover:border-slate-500 transition cursor-pointer"
             >
               <Maximize className="w-4 h-4" />
+            </button>
+
+            {/* Customer Care Live Chat Quick Button */}
+            <button
+              type="button"
+              onClick={() => handleNavClick('support_desk')}
+              title="Customer Care Live Chat"
+              className="p-2 rounded-xl bg-[#141829] border border-[#23273c] text-slate-400 hover:text-white hover:border-amber-500/50 transition cursor-pointer relative"
+            >
+              <MessageSquare className="w-4 h-4 text-amber-400" />
+              {(liveCounts.escalatedTickets > 0 || liveCounts.openTickets > 0) && (
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 absolute -top-0.5 -right-0.5 ring-2 ring-[#0e111e] animate-pulse" />
+              )}
             </button>
 
             {/* Notifications Button */}

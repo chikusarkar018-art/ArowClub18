@@ -412,12 +412,13 @@ export const UserGamePanel: React.FC = () => {
           />
         )}
 
-        {/* Floating Customer Care Button */}
-        <DraggableCustomerCareButton onClick={() => setShowSupportModal(true)} />
-
-        {/* Global Customer Care View */}
-        {showSupportModal && (
-          <CustomerCareView onClose={() => setShowSupportModal(false)} />
+        {/* Customer Care as full dedicated page for guest/unauth */}
+        {activePage === 'customer_care' ? (
+          <div className="fixed inset-0 z-50 bg-white overflow-y-auto">
+            <CustomerCareView onClose={() => navigateTo('game')} />
+          </div>
+        ) : (
+          <DraggableCustomerCareButton onClick={() => navigateTo('customer_care')} />
         )}
       </div>
     );
@@ -633,7 +634,7 @@ export const UserGamePanel: React.FC = () => {
             onNavigateGameHistory={() => navigateTo('game_history')}
             onNavigateVip={() => navigateTo('vip')}
             onOpenNotifications={() => setShowNotificationsModal(true)}
-            onOpenSupport={() => setShowSupportModal(true)}
+            onOpenSupport={() => navigateTo('customer_care')}
             onOpenHowToPlay={() => setShowHowToPlayModal(true)}
             onOpenGiftRedeem={() => setShowGiftRedeemModal(true)}
             onLogout={logoutUser}
@@ -655,14 +656,14 @@ export const UserGamePanel: React.FC = () => {
             onNavigateReferral={() => navigateTo('promotion')}
             onNavigateProfile={() => navigateTo('profile')}
             onOpenNotifications={() => setShowNotificationsModal(true)}
-            onOpenSupport={() => setShowSupportModal(true)}
+            onOpenSupport={() => navigateTo('customer_care')}
             onOpenGiftRedeem={() => setShowGiftRedeemModal(true)}
           />
         );
     }
   };
 
-  const isStandaloneGame = ['teen_patti', 'seven_up_down', 'andar_bahar', 'plinko', 'roulette', 'game', 'aviator', 'mines', 'chicken_road', 'ludo'].includes(activePage);
+  const isStandaloneGame = ['teen_patti', 'seven_up_down', 'andar_bahar', 'plinko', 'roulette', 'game', 'aviator', 'mines', 'chicken_road', 'ludo', 'customer_care'].includes(activePage);
 
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#060709] text-white flex flex-col font-sans relative select-none">
@@ -779,10 +780,8 @@ export const UserGamePanel: React.FC = () => {
       )}
 
       {/* Draggable Floating Customer Care Button (Bottom Right - User can adjust position freely) */}
-      <DraggableCustomerCareButton onClick={() => setShowSupportModal(true)} />
-
-      {showSupportModal && (
-        <CustomerCareView onClose={() => setShowSupportModal(false)} />
+      {activePage !== 'customer_care' && (
+        <DraggableCustomerCareButton onClick={() => navigateTo('customer_care')} />
       )}
 
       {showGiftRedeemModal && (

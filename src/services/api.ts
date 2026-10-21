@@ -859,6 +859,19 @@ class ApiService {
     });
   }
 
+  async setSupportTyping(sender: 'user' | 'admin', isTyping: boolean, uid?: string) {
+    return this.request('/api/support/typing', {
+      method: 'POST',
+      body: JSON.stringify({ sender, isTyping, uid }),
+    });
+  }
+
+  async clearUserSupportChat() {
+    return this.request('/api/support/clear', {
+      method: 'POST',
+    });
+  }
+
   async markSupportSeen() {
     return this.request('/api/support/mark-seen', {
       method: 'POST',

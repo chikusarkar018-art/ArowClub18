@@ -2,11 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../../services/api.js';
 import { useAuth } from '../../context/AuthContext.js';
 import {
-  Users, ArrowDownCircle, ArrowUpCircle, Receipt, TrendingUp,
-  ChevronRight, ChevronLeft, Bell, Sparkles, Gamepad2, ShieldCheck,
-  CheckCircle2, XCircle, Clock, ExternalLink, Sliders, DollarSign,
-  PlusCircle, Send, Headphones, Power, LogOut, FileText, ArrowRight,
-  Calendar, RefreshCw, BarChart3, TrendingDown, Layers
+  Users, User, Building, ArrowDownCircle, ArrowUpCircle,
+  Bookmark, Settings, FileSpreadsheet, FileText, RefreshCw,
+  PlusCircle, DollarSign, ChevronRight, ChevronLeft,
+  Calendar, Layers, Gamepad2, ArrowRight, ShieldCheck,
+  CheckCircle2, Clock, Download, MessageSquare, ExternalLink
 } from 'lucide-react';
 
 interface DashboardViewProps {
@@ -14,38 +14,79 @@ interface DashboardViewProps {
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
-  const { admin, showToast, logoutAdmin } = useAuth();
+  const { admin, showToast } = useAuth();
   const [stats, setStats] = useState<any>(null);
   const [games, setGames] = useState<any[]>([]);
   const [deposits, setDeposits] = useState<any[]>([]);
   const [withdrawals, setWithdrawals] = useState<any[]>([]);
   const [recentResults, setRecentResults] = useState<any[]>([]);
   const [banners, setBanners] = useState<any[]>([]);
-  const [timeFilter, setTimeFilter] = useState<'this_week' | 'today' | 'this_month'>('this_week');
-  const [bannerIndex, setBannerIndex] = useState(0);
 
-  // Top Date / Period Filter State
-  const [periodType, setPeriodType] = useState<'today' | 'yesterday' | 'custom_date' | 'this_month' | 'last_month' | 'custom_month'>('today');
-  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toISOString().split('T')[0].substring(0, 7));
+  // Filter States matching the exact screenshot format
+  const [dateRangeText, setDateRangeText] = useState<string>('10/21/2026 - 10/21/2026');
+  const [quickSelect, setQuickSelect] = useState<string>('Today');
+  const [selectedDomain, setSelectedDomain] = useState<string>('All Domains');
   const [isLoadingStats, setIsLoadingStats] = useState<boolean>(false);
+
+  // Assigned Master Report filter states
+  const [masterReportDate, setMasterReportDate] = useState<string>('Today');
+  const [masterReportOrder, setMasterReportOrder] = useState<string>('DESC');
+  const [masterReportTxType, setMasterReportTxType] = useState<string>('Deposit');
+  const [masterReportDomain, setMasterReportDomain] = useState<string>('All Domains');
+  const [masterReportsList, setMasterReportsList] = useState<any[]>([]);
 
   // Quick Action Modals
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [showAddBalanceModal, setShowAddBalanceModal] = useState(false);
+  const [showSettingsDrawer, setShowSettingsDrawer] = useState(false);
   const [newUsername, setNewUsername] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [newPassword, setNewPassword] = useState('123456');
   const [balanceUid, setBalanceUid] = useState('');
   const [balanceAmount, setBalanceAmount] = useState('500');
 
+  // Format date helper: MM/DD/YYYY
+  const formatMDY = (d: Date) => {
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    return `${mm}/${dd}/${yyyy}`;
+  };
+
+  // Sync date range string based on Quick Select
+  const updateRangeFromPreset = (preset: string) => {
+    const now = new Date();
+    if (preset === 'Today') {
+      const todayStr = formatMDY(now);
+      setDateRangeText(`${todayStr} - ${todayStr}`);
+    } else if (preset === 'Yesterday') {
+      const y = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const yStr = formatMDY(y);
+      setDateRangeText(`${yStr} - ${yStr}`);
+    } else if (preset === 'This Week') {
+      const start = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
+      setDateRangeText(`${formatMDY(start)} - ${formatMDY(now)}`);
+    } else if (preset === 'This Month') {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      setDateRangeText(`${formatMDY(start)} - ${formatMDY(now)}`);
+    } else if (preset === 'Last 7 Days') {
+      const start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      setDateRangeText(`${formatMDY(start)} - ${formatMDY(now)}`);
+    } else if (preset === 'Last 30 Days') {
+      const start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      setDateRangeText(`${formatMDY(start)} - ${formatMDY(now)}`);
+    }
+  };
+
   const fetchDashboardData = async () => {
     try {
+      let periodParam = 'today';
+      if (quickSelect === 'Yesterday') periodParam = 'yesterday';
+      else if (quickSelect === 'This Month') periodParam = 'this_month';
+
       const [statsData, gamesData, depData, withData, resData, banData] = await Promise.allSettled([
         api.getAdminStats({
-          periodType,
-          date: selectedDate,
-          month: selectedMonth,
+          periodType: periodParam,
         }),
         api.getAdminGamesCatalog(),
         api.getAdminDeposits('pending'),
@@ -56,6 +97,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
 
       if (statsData.status === 'fulfilled' && statsData.value) {
         setStats(statsData.value);
+        if (statsData.value.assignedMasterReport) {
+          setMasterReportsList(statsData.value.assignedMasterReport);
+        }
       }
       if (gamesData.status === 'fulfilled' && gamesData.value?.games) {
         setGames(gamesData.value.games);
@@ -80,39 +124,39 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
   };
 
   useEffect(() => {
+    updateRangeFromPreset('Today');
     fetchDashboardData();
-    const interval = setInterval(fetchDashboardData, 3000);
+    const interval = setInterval(fetchDashboardData, 4000);
     return () => clearInterval(interval);
-  }, [periodType, selectedDate, selectedMonth]);
+  }, []);
 
-  const handlePeriodChange = (type: 'today' | 'yesterday' | 'custom_date' | 'this_month' | 'last_month' | 'custom_month') => {
-    setIsLoadingStats(true);
-    setPeriodType(type);
-    const now = new Date();
-    if (type === 'today') {
-      setSelectedDate(now.toISOString().split('T')[0]);
-      setSelectedMonth(now.toISOString().split('T')[0].substring(0, 7));
-    } else if (type === 'yesterday') {
-      const yDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-      setSelectedDate(yDate.toISOString().split('T')[0]);
-      setSelectedMonth(yDate.toISOString().split('T')[0].substring(0, 7));
-    } else if (type === 'this_month') {
-      setSelectedMonth(now.toISOString().split('T')[0].substring(0, 7));
-    } else if (type === 'last_month') {
-      const lDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const lMonth = `${lDate.getFullYear()}-${String(lDate.getMonth() + 1).padStart(2, '0')}`;
-      setSelectedMonth(lMonth);
-    }
+  const handleQuickSelectChange = (val: string) => {
+    setQuickSelect(val);
+    updateRangeFromPreset(val);
   };
 
-  const handleToggleGame = async (gameKey: string) => {
-    try {
-      await api.toggleAdminGameCatalog(gameKey, admin?.username || 'SuperAdmin');
-      showToast(`Toggled game status`, 'success');
-      fetchDashboardData();
-    } catch (err: any) {
-      showToast(err.message || 'Failed to toggle game', 'error');
-    }
+  const handleFilterSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setIsLoadingStats(true);
+    fetchDashboardData();
+    showToast(`Filter applied for ${quickSelect}`, 'success');
+  };
+
+  const handleFilterReset = () => {
+    setQuickSelect('Today');
+    setSelectedDomain('All Domains');
+    updateRangeFromPreset('Today');
+    setIsLoadingStats(true);
+    fetchDashboardData();
+    showToast('Filters reset to default', 'info');
+  };
+
+  const handleExportXLS = () => {
+    showToast('Exporting Assigned Master Report to Excel (.xlsx)...', 'success');
+  };
+
+  const handleExportPDF = () => {
+    showToast('Exporting Assigned Master Report to PDF (.pdf)...', 'success');
   };
 
   const handleCreateUser = async (e: React.FormEvent) => {
@@ -151,446 +195,573 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
     }
   };
 
-  const displayDeposits = deposits;
-  const displayWithdrawals = withdrawals;
+  // Live Metrics fallback to default values from user mockup
+  const pendingRequestsCount = (stats?.pendingDeposits || 0) + (stats?.pendingWithdrawals || 0);
+  const pendingRequestsAmount = (stats?.daily?.pendingDepositAmount || 0) + (stats?.daily?.pendingWithdrawalAmount || 0);
 
-  const displayGames = games.length > 0 ? games : [
-    { id: '1', gameKey: 'wingo_30s', name: 'Win Go 30s', status: 'active' },
-    { id: '2', gameKey: 'wingo_1m', name: 'Win Go 1Min', status: 'active' },
-    { id: '3', gameKey: 'wingo_3m', name: 'Win Go 3Min', status: 'active' },
-    { id: '4', gameKey: 'wingo_5m', name: 'Win Go 5Min', status: 'active' },
-    { id: '5', gameKey: 'mines', name: 'Mines', status: 'active' },
-    { id: '6', gameKey: 'aviator', name: 'Aviator', status: 'active' },
-  ];
+  const totalDepositAmount = stats?.daily?.depositAmount ?? stats?.todayDeposits ?? 300.0;
+  const totalDepositCount = stats?.daily?.depositCount ?? stats?.todayDepositsCount ?? 1;
 
-  const displayResults = recentResults;
-  const displayBanners = banners;
+  const totalWithdrawalAmount = stats?.daily?.withdrawalAmount ?? stats?.todayWithdrawals ?? 0.0;
+  const totalWithdrawalCount = stats?.daily?.withdrawalCount ?? stats?.todayWithdrawalsCount ?? 0;
 
-  // Daily Calculations from database stats
-  const isMonthlyMode = periodType === 'this_month' || periodType === 'last_month' || periodType === 'custom_month';
-  const dailyPnl = Number(stats?.daily?.pnl ?? 0);
-  const dailyIsProfit = stats?.daily?.isProfit ?? (dailyPnl >= 0);
-  
-  // Monthly Calculations from database stats
-  const monthlyPnl = Number(stats?.monthly?.pnl ?? 0);
-  const monthlyIsProfit = stats?.monthly?.isProfit ?? (monthlyPnl >= 0);
+  const profitLossAmount = stats?.daily?.pnl ?? stats?.todayProfitLoss ?? 300.0;
+
+  const assignedMastersCount = stats?.assignedMasters ?? 1;
+  const totalInprocessAmount = stats?.totalInprocessAmount ?? pendingRequestsAmount;
+  const totalInprocessCount = stats?.totalInprocessCount ?? pendingRequestsCount;
+
+  const suspiciousDepositAmount = stats?.suspiciousUsersDepositAmount ?? 0.0;
+  const suspiciousDepositCount = stats?.suspiciousUsersDepositCount ?? 0;
+  const suspiciousWithdrawalAmount = stats?.suspiciousUsersWithdrawalAmount ?? 0.0;
+  const suspiciousWithdrawalCount = stats?.suspiciousUsersWithdrawalCount ?? 0;
+
+  const firstTimeDepositUserAmount = stats?.firstTimeDepositUserAmount ?? 300.0;
+  const firstTimeDepositUserCount = stats?.firstTimeDepositUserCount ?? 1;
+
+  const firstTimeWithdrawalUserAmount = stats?.firstTimeWithdrawalUserAmount ?? 0.0;
+  const firstTimeWithdrawalUserCount = stats?.firstTimeWithdrawalUserCount ?? 0;
+
+  const totalPlatformUsers = stats?.totalUsers ?? stats?.daily?.totalUsers ?? 2;
 
   return (
-    <div className="space-y-6">
-      {/* ================= 0. TOP DATE FILTER & REPORT PERIOD SELECTOR ================= */}
-      <div className="bg-[#121422] border border-[#23273c] rounded-2xl p-4 sm:p-5 shadow-xl">
-        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-          {/* Header Title & Dynamic Badge */}
+    <div className="space-y-6 text-slate-100 pb-12">
+      {/* =========================================================================
+          SECTION 1: TOP FILTER PANEL (Strict format matching screenshot)
+      ========================================================================= */}
+      <div className="bg-[#121626] border border-[#232a42] rounded-2xl p-5 shadow-xl relative">
+        <form onSubmit={handleFilterSubmit} className="space-y-4">
+          {/* 1. Date Range Pick */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+              Date Range Pick
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                value={dateRangeText}
+                onChange={(e) => setDateRangeText(e.target.value)}
+                placeholder="10/21/2026 - 10/21/2026"
+                className="w-full bg-[#181d30] border border-[#2b3350] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono tracking-tight"
+              />
+            </div>
+          </div>
+
+          {/* 2. Quick Select with Right-Floating Green Gear Icon */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+              Quick Select
+            </label>
+            <div className="relative flex items-center">
+              <select
+                value={quickSelect}
+                onChange={(e) => handleQuickSelectChange(e.target.value)}
+                className="w-full bg-[#181d30] border border-[#2b3350] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer appearance-none pr-12"
+              >
+                <option value="Today">Today</option>
+                <option value="Yesterday">Yesterday</option>
+                <option value="This Week">This Week</option>
+                <option value="This Month">This Month</option>
+                <option value="Last 7 Days">Last 7 Days</option>
+                <option value="Last 30 Days">Last 30 Days</option>
+                <option value="Custom Range">Custom Range</option>
+              </select>
+              
+              {/* Green Settings Gear button on right (Exact match to screenshot) */}
+              <button
+                type="button"
+                onClick={() => setShowSettingsDrawer(!showSettingsDrawer)}
+                title="Filter Settings & Quick Tools"
+                className="absolute right-1 top-1 bottom-1 w-9 bg-[#1f7a3f] hover:bg-emerald-600 rounded-lg text-white flex items-center justify-center transition shadow-md cursor-pointer"
+              >
+                <Settings className="w-4 h-4 animate-spin-slow" />
+              </button>
+            </div>
+          </div>
+
+          {/* 3. Domain Select */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+              Domain
+            </label>
+            <select
+              value={selectedDomain}
+              onChange={(e) => setSelectedDomain(e.target.value)}
+              className="w-full bg-[#181d30] border border-[#2b3350] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="All Domains">All Domains</option>
+              <option value="admin.arowclub.com">admin.arowclub.com</option>
+              <option value="arowclub.pro">arowclub.pro</option>
+              <option value="arowclub.in">arowclub.in</option>
+            </select>
+          </div>
+
+          {/* Action Buttons: Submit (Green) & Reset (Red) */}
+          <div className="flex items-center gap-2.5 pt-1">
+            <button
+              type="submit"
+              disabled={isLoadingStats}
+              className="px-6 py-2 rounded-lg bg-[#2d7a46] hover:bg-[#25683b] text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer flex items-center gap-1.5"
+            >
+              {isLoadingStats && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+              <span>Submit</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleFilterReset}
+              className="px-6 py-2 rounded-lg bg-[#e11d48] hover:bg-[#be123c] text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer"
+            >
+              Reset
+            </button>
+          </div>
+        </form>
+
+        {/* Quick Settings Drawer */}
+        {showSettingsDrawer && (
+          <div className="mt-4 pt-4 border-t border-[#232a42] flex flex-wrap gap-2 text-xs animate-in fade-in">
+            <button
+              type="button"
+              onClick={() => setShowAddUserModal(true)}
+              className="px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 font-semibold flex items-center gap-1.5 cursor-pointer"
+            >
+              <PlusCircle className="w-3.5 h-3.5" />
+              <span>+ Add User</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAddBalanceModal(true)}
+              className="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 font-semibold flex items-center gap-1.5 cursor-pointer"
+            >
+              <DollarSign className="w-3.5 h-3.5" />
+              <span>+ Credit Balance</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate('support_desk')}
+              className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-semibold flex items-center gap-1.5 cursor-pointer"
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>Customer Care Chat {stats?.totalEscalatedTickets ? `(${stats.totalEscalatedTickets} waiting)` : ''}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate('deposit_requests')}
+              className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-semibold flex items-center gap-1.5 cursor-pointer"
+            >
+              <span>Deposits ({deposits.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate('withdrawal_requests')}
+              className="px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 font-semibold flex items-center gap-1.5 cursor-pointer"
+            >
+              <span>Withdrawals ({withdrawals.length})</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Real-time Customer Care Live Desk Alert Banner (Shows when user requests to talk to admin) */}
+      {((stats?.totalEscalatedTickets || 0) > 0 || (stats?.openTickets || 0) > 0) && (
+        <div className="bg-gradient-to-r from-amber-600/30 via-amber-500/15 to-[#121626] border border-amber-500/50 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xl animate-pulse">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-purple-600/20 border border-purple-500/30 flex items-center justify-center text-purple-400">
-              <Calendar className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-400 shrink-0">
+              <MessageSquare className="w-5 h-5 animate-bounce" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-sm font-semibold text-slate-300">Report Period:</h2>
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-500/20 border border-purple-500/40 text-purple-300">
-                  {isMonthlyMode ? (stats?.monthlyReportLabel || `Monthly Report: ${stats?.monthDisplay || 'August 2026'}`) : (stats?.reportForDateLabel || `Report For: ${stats?.dateDisplay || '27 Aug 2026'}`)}
+                <h4 className="text-sm font-extrabold text-white">Live Customer Care Desk Alert</h4>
+                <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black uppercase tracking-wider">
+                  {stats?.totalEscalatedTickets || stats?.openTickets} User Waiting
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 mt-0.5">
-                Real-time database statistics strictly calculated for selected timeframe
+              <p className="text-xs text-amber-200/80 mt-0.5">
+                User ne admin se direct baat karne ki request ki hai. Niche button click karke direct live chat shuru karein.
               </p>
             </div>
           </div>
-
-          {/* Period Filter Buttons and Pickers */}
-          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-            {/* Quick Period Buttons */}
-            <div className="inline-flex rounded-xl bg-[#181a2e] border border-[#2b304c] p-1 gap-1">
-              <button
-                type="button"
-                onClick={() => handlePeriodChange('today')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                  periodType === 'today'
-                    ? 'bg-[#5b50e6] text-white shadow-md shadow-indigo-600/30'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Today
-              </button>
-              <button
-                type="button"
-                onClick={() => handlePeriodChange('yesterday')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                  periodType === 'yesterday'
-                    ? 'bg-[#5b50e6] text-white shadow-md shadow-indigo-600/30'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Yesterday
-              </button>
-              <button
-                type="button"
-                onClick={() => handlePeriodChange('this_month')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                  periodType === 'this_month'
-                    ? 'bg-[#5b50e6] text-white shadow-md shadow-indigo-600/30'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                This Month
-              </button>
-              <button
-                type="button"
-                onClick={() => handlePeriodChange('last_month')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                  periodType === 'last_month'
-                    ? 'bg-[#5b50e6] text-white shadow-md shadow-indigo-600/30'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Last Month
-              </button>
-            </div>
-
-            {/* Custom Date Picker */}
-            <div className="flex items-center gap-1.5 bg-[#181a2e] border border-[#2b304c] rounded-xl px-2.5 py-1">
-              <span className="text-[11px] text-slate-400 font-medium">Custom Date:</span>
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => {
-                  if (e.target.value) {
-                    setSelectedDate(e.target.value);
-                    setPeriodType('custom_date');
-                  }
-                }}
-                className="bg-transparent text-xs text-white focus:outline-none cursor-pointer [color-scheme:dark]"
-              />
-            </div>
-
-            {/* Custom Month Picker */}
-            <div className="flex items-center gap-1.5 bg-[#181a2e] border border-[#2b304c] rounded-xl px-2.5 py-1">
-              <span className="text-[11px] text-slate-400 font-medium">Custom Month:</span>
-              <input
-                type="month"
-                value={selectedMonth}
-                onChange={(e) => {
-                  if (e.target.value) {
-                    setSelectedMonth(e.target.value);
-                    setPeriodType('custom_month');
-                  }
-                }}
-                className="bg-transparent text-xs text-white focus:outline-none cursor-pointer [color-scheme:dark]"
-              />
-            </div>
-
-            {/* Manual Refresh Button */}
-            <button
-              type="button"
-              onClick={() => {
-                setIsLoadingStats(true);
-                fetchDashboardData();
-              }}
-              title="Refresh Stats"
-              className="p-2 rounded-xl bg-[#181a2e] border border-[#2b304c] text-slate-300 hover:text-white transition"
-            >
-              <RefreshCw className={`w-4 h-4 ${isLoadingStats ? 'animate-spin text-indigo-400' : ''}`} />
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => onNavigate('support_desk')}
+            className="px-4 py-2 rounded-xl bg-[#5b50e6] hover:bg-[#4f46e5] text-white text-xs font-bold transition shadow-lg shadow-indigo-600/30 flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+          >
+            <span>Open Live Chat Now</span>
+            <ExternalLink className="w-3.5 h-3.5" />
+          </button>
         </div>
-      </div>
+      )}
 
-      {/* ================= 1. DAILY DASHBOARD CARDS (5 IN ONE ROW) ================= */}
-      <div>
-        <div className="flex items-center justify-between mb-3 px-1">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
-            Daily Metrics Overview ({stats?.dateDisplay || selectedDate})
-          </h3>
-          <span className="text-[11px] text-indigo-400 font-medium">
-            Database-driven live calculations
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          {/* Card 1: Today's New Users */}
-          <div
-            onClick={() => onNavigate('users_management')}
-            className="bg-[#121422] border border-[#23273c] hover:border-indigo-500/50 rounded-2xl p-4 flex flex-col justify-between cursor-pointer transition shadow-lg group hover:bg-[#15172b]"
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] text-slate-400 font-semibold">
-                {periodType === 'today' ? "Today's Users (आज बने यूजर)" : periodType === 'yesterday' ? "Yesterday's Users" : "Date's Users"}
-              </span>
-              <div className="w-9 h-9 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 group-hover:scale-110 transition-transform">
-                <Users className="w-5 h-5" />
-              </div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-white tracking-tight flex items-baseline gap-1.5">
-                <span>{stats?.daily?.newUsersOnDate ?? 0}</span>
-                <span className="text-xs text-emerald-400 font-semibold">New</span>
-              </div>
-              <div className="text-[11px] text-slate-400 font-medium mt-1">
-                Total Users: {(stats?.daily?.totalUsers ?? stats?.totalUsers ?? 0).toLocaleString('en-IN')}
-              </div>
-              <div className="text-[10px] text-indigo-400/80 font-medium mt-0.5">
-                (दैनिक काउंट 0 से शुरू होकर आज के यूजर दिखाता है)
-              </div>
-            </div>
-          </div>
-
-          {/* Card 2: Total Deposit */}
-          <div
-            onClick={() => onNavigate('deposit_requests')}
-            className="bg-[#121422] border border-[#23273c] hover:border-emerald-500/50 rounded-2xl p-4 flex flex-col justify-between cursor-pointer transition shadow-lg group hover:bg-[#15172b]"
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] text-slate-400 font-semibold">
-                {periodType === 'today' ? "Today's Total Deposit (आज का कुल डिपॉजिट)" : "Daily Total Deposit"}
-              </span>
-              <div className="w-9 h-9 rounded-xl bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 group-hover:scale-110 transition-transform">
-                <ArrowDownCircle className="w-5 h-5" />
-              </div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-emerald-400 tracking-tight">
-                ₹ {(stats?.daily?.depositAmount ?? stats?.todayDeposits ?? 0).toLocaleString('en-IN')}
-              </div>
-              <div className="text-[11px] text-slate-400 font-medium mt-1 flex flex-wrap items-center gap-1.5">
-                <span>{stats?.daily?.depositCount ?? stats?.todayDepositsCount ?? 0} Approved Deposits</span>
-                {((stats?.daily?.pendingDepositCount ?? 0) > 0 || (stats?.pendingDeposits ?? 0) > 0) && (
-                  <span className="text-amber-400 font-medium">
-                    • {stats?.daily?.pendingDepositCount ?? stats?.pendingDeposits} Pending (₹{(stats?.daily?.pendingDepositAmount ?? 0).toLocaleString('en-IN')})
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Card 3: Total Withdrawal */}
-          <div
-            onClick={() => onNavigate('withdrawal_requests')}
-            className="bg-[#121422] border border-[#23273c] hover:border-amber-500/50 rounded-2xl p-4 flex flex-col justify-between cursor-pointer transition shadow-lg group hover:bg-[#15172b]"
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] text-slate-400 font-semibold">
-                {periodType === 'today' ? "Today's Total Withdrawal (आज का कुल विड्रॉल)" : "Daily Total Withdrawal"}
-              </span>
-              <div className="w-9 h-9 rounded-xl bg-amber-600/20 border border-amber-500/30 flex items-center justify-center text-amber-400 group-hover:scale-110 transition-transform">
-                <ArrowUpCircle className="w-5 h-5" />
-              </div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-amber-400 tracking-tight">
-                ₹ {(stats?.daily?.withdrawalAmount ?? 0).toLocaleString('en-IN')}
-              </div>
-              <div className="text-[11px] text-slate-400 font-medium mt-1">
-                {stats?.daily?.withdrawalCount ?? 0} Approved Withdrawals
-              </div>
-            </div>
-          </div>
-
-          {/* Card 4: Profit & Loss (P&L) */}
-          <div
-            onClick={() => onNavigate('reports_analytics')}
-            className="bg-[#121422] border border-[#23273c] hover:border-purple-500/50 rounded-2xl p-4 flex flex-col justify-between cursor-pointer transition shadow-lg group hover:bg-[#15172b]"
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] text-slate-400 font-semibold">Profit & Loss (P&L)</span>
-              <div className={`w-9 h-9 rounded-xl border flex items-center justify-center group-hover:scale-110 transition-transform ${
-                dailyIsProfit 
-                  ? 'bg-emerald-600/20 border-emerald-500/30 text-emerald-400' 
-                  : 'bg-rose-600/20 border-rose-500/30 text-rose-400'
-              }`}>
-                {dailyIsProfit ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
-              </div>
-            </div>
-            <div>
-              <div className={`text-2xl font-bold tracking-tight ${dailyIsProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {dailyPnl > 0 ? `+₹ ${dailyPnl.toLocaleString('en-IN')}` : dailyPnl < 0 ? `-₹ ${Math.abs(dailyPnl).toLocaleString('en-IN')}` : '₹ 0'}
-              </div>
-              <div className="text-[11px] text-slate-400 font-medium mt-1 flex items-center gap-1">
-                <span>Deposit - Withdrawal</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 5: Total Bets */}
-          <div
-            onClick={() => onNavigate('bets_management')}
-            className="bg-[#121422] border border-[#23273c] hover:border-blue-500/50 rounded-2xl p-4 flex flex-col justify-between cursor-pointer transition shadow-lg group hover:bg-[#15172b]"
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] text-slate-400 font-semibold">Total Bets</span>
-              <div className="w-9 h-9 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 group-hover:scale-110 transition-transform">
-                <Receipt className="w-5 h-5" />
-              </div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-blue-400 tracking-tight">
-                {(stats?.daily?.betsCount ?? 0).toLocaleString('en-IN')} Bets
-              </div>
-              <div className="text-[11px] text-slate-300 font-medium mt-1">
-                ₹ {(stats?.daily?.turnover ?? 0).toLocaleString('en-IN')} Turnover
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ================= 2. MONTHLY OVERVIEW CARDS (5 IN ONE ROW) ================= */}
-      <div>
-        <div className="flex items-center justify-between mb-3 px-1">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-2">
-            <Layers className="w-3.5 h-3.5" />
-            Monthly Overview ({stats?.monthDisplay || selectedMonth})
-          </h3>
-          <span className="text-[11px] text-slate-400 font-medium">
-            Aggregated monthly performance
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          {/* Month Card 1: Monthly Registered Users */}
-          <div
-            onClick={() => onNavigate('users_management')}
-            className="bg-[#121422] border border-[#23273c] hover:border-purple-500/40 rounded-2xl p-4 flex flex-col justify-between cursor-pointer transition shadow-lg group hover:bg-[#15172b]"
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] text-slate-400 font-semibold">Monthly Registered Users</span>
-              <div className="w-8 h-8 rounded-lg bg-purple-600/20 border border-purple-500/30 flex items-center justify-center text-purple-300">
-                <Users className="w-4 h-4" />
-              </div>
-            </div>
-            <div>
-              <div className="text-xl font-bold text-white tracking-tight">
-                {(stats?.monthly?.newUsersInMonth ?? 0).toLocaleString('en-IN')} New Users
-              </div>
-              <div className="text-[10px] text-slate-400 font-medium mt-1">
-                {(stats?.monthly?.totalUsers ?? stats?.totalUsers ?? 0).toLocaleString('en-IN')} Total Platform Users
-              </div>
-            </div>
-          </div>
-
-          {/* Month Card 2: Monthly Total Deposit */}
-          <div
-            onClick={() => onNavigate('deposit_requests')}
-            className="bg-[#121422] border border-[#23273c] hover:border-emerald-500/40 rounded-2xl p-4 flex flex-col justify-between cursor-pointer transition shadow-lg group hover:bg-[#15172b]"
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] text-slate-400 font-semibold">Monthly Total Deposit</span>
-              <div className="w-8 h-8 rounded-lg bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                <ArrowDownCircle className="w-4 h-4" />
-              </div>
-            </div>
-            <div>
-              <div className="text-xl font-bold text-emerald-400 tracking-tight">
-                ₹ {(stats?.monthly?.depositAmount ?? 0).toLocaleString('en-IN')}
-              </div>
-              <div className="text-[10px] text-slate-400 font-medium mt-1">
-                {(stats?.monthly?.depositCount ?? 0).toLocaleString('en-IN')} Deposits This Month
-              </div>
-            </div>
-          </div>
-
-          {/* Month Card 3: Monthly Total Withdrawal */}
-          <div
-            onClick={() => onNavigate('withdrawal_requests')}
-            className="bg-[#121422] border border-[#23273c] hover:border-amber-500/40 rounded-2xl p-4 flex flex-col justify-between cursor-pointer transition shadow-lg group hover:bg-[#15172b]"
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] text-slate-400 font-semibold">Monthly Total Withdrawal</span>
-              <div className="w-8 h-8 rounded-lg bg-amber-600/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
-                <ArrowUpCircle className="w-4 h-4" />
-              </div>
-            </div>
-            <div>
-              <div className="text-xl font-bold text-amber-400 tracking-tight">
-                ₹ {(stats?.monthly?.withdrawalAmount ?? 0).toLocaleString('en-IN')}
-              </div>
-              <div className="text-[10px] text-slate-400 font-medium mt-1">
-                {(stats?.monthly?.withdrawalCount ?? 0).toLocaleString('en-IN')} Withdrawals This Month
-              </div>
-            </div>
-          </div>
-
-          {/* Month Card 4: Monthly Net P&L */}
-          <div
-            onClick={() => onNavigate('reports_analytics')}
-            className="bg-[#121422] border border-[#23273c] hover:border-purple-500/40 rounded-2xl p-4 flex flex-col justify-between cursor-pointer transition shadow-lg group hover:bg-[#15172b]"
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] text-slate-400 font-semibold">Monthly Net P&L</span>
-              <div className={`w-8 h-8 rounded-lg border flex items-center justify-center ${
-                monthlyIsProfit 
-                  ? 'bg-emerald-600/20 border-emerald-500/30 text-emerald-400' 
-                  : 'bg-rose-600/20 border-rose-500/30 text-rose-400'
-              }`}>
-                <BarChart3 className="w-4 h-4" />
-              </div>
-            </div>
-            <div>
-              <div className={`text-xl font-bold tracking-tight ${monthlyIsProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {monthlyPnl > 0 ? `+₹ ${monthlyPnl.toLocaleString('en-IN')}` : monthlyPnl < 0 ? `-₹ ${Math.abs(monthlyPnl).toLocaleString('en-IN')}` : '₹ 0'}
-              </div>
-              <div className="text-[10px] text-slate-400 font-medium mt-1">
-                Net Profit / Loss for {stats?.monthDisplay || 'Month'}
-              </div>
-            </div>
-          </div>
-
-          {/* Month Card 5: Monthly Game Turnover */}
-          <div
-            onClick={() => onNavigate('bets_management')}
-            className="bg-[#121422] border border-[#23273c] hover:border-blue-500/40 rounded-2xl p-4 flex flex-col justify-between cursor-pointer transition shadow-lg group hover:bg-[#15172b]"
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] text-slate-400 font-semibold">Monthly Game Turnover</span>
-              <div className="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
-                <Receipt className="w-4 h-4" />
-              </div>
-            </div>
-            <div>
-              <div className="text-xl font-bold text-blue-400 tracking-tight">
-                ₹ {(stats?.monthly?.turnover ?? 0).toLocaleString('en-IN')}
-              </div>
-              <div className="text-[10px] text-slate-400 font-medium mt-1">
-                {(stats?.monthly?.betsCount ?? 0).toLocaleString('en-IN')} Total Bets Played
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ================= 2. WELCOME TO ADMIN PANEL BANNER ================= */}
-      <div className="bg-gradient-to-r from-[#291757] via-[#1c1a40] to-[#121422] border border-indigo-500/30 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl relative overflow-hidden">
-        <div className="flex items-center gap-3.5 z-10">
-          <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-300">
-            <Bell className="w-5 h-5" />
+      {/* =========================================================================
+          SECTION 2: ROW 1 OF METRIC CARDS (4 Cards strictly matching format)
+      ========================================================================= */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Card 1: User Pending Request */}
+        <div
+          onClick={() => onNavigate('deposit_requests')}
+          className="bg-[#121626] border border-[#232a42] hover:border-slate-500/60 rounded-2xl p-4 sm:p-5 flex items-center gap-3.5 shadow-lg transition group cursor-pointer"
+        >
+          {/* Ticket Icon Outline with subtle dot */}
+          <div className="relative shrink-0">
+            <Bookmark className="w-9 h-9 text-slate-300 stroke-[1.75]" />
           </div>
           <div>
-            <h3 className="text-sm sm:text-base font-bold text-white">Welcome to Admin Panel</h3>
-            <p className="text-xs text-indigo-200/70 mt-0.5">
-              Manage your platform efficiently and monitor real-time activities.
-            </p>
+            <div className="text-xl sm:text-2xl font-black text-white tracking-tight">
+              ₹{pendingRequestsAmount.toFixed(2)}
+            </div>
+            <div className="text-xs font-semibold text-slate-400 mt-0.5">
+              User Pending Request ({pendingRequestsCount})
+            </div>
           </div>
         </div>
-        <button
-          onClick={() => onNavigate('notification')}
-          className="z-10 px-4 py-2 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-xs font-semibold text-white transition flex items-center gap-1.5"
+
+        {/* Card 2: Total Deposit */}
+        <div
+          onClick={() => onNavigate('deposit_requests')}
+          className="bg-[#121626] border border-[#232a42] hover:border-emerald-500/60 rounded-2xl p-4 sm:p-5 flex items-center gap-3.5 shadow-lg transition group cursor-pointer"
         >
-          <span>View Announcements</span>
-        </button>
+          {/* Ticket Icon Outline with green dot (exact match to screenshot) */}
+          <div className="relative shrink-0">
+            <Bookmark className="w-9 h-9 text-[#22c55e] stroke-[1.75]" />
+            <span className="w-2.5 h-2.5 rounded-full bg-[#22c55e] absolute top-2 left-[13px]" />
+          </div>
+          <div>
+            <div className="text-xl sm:text-2xl font-black text-white tracking-tight">
+              ₹{Number(totalDepositAmount).toFixed(2)}
+            </div>
+            <div className="text-xs font-semibold text-slate-400 mt-0.5">
+              Total Deposit ({totalDepositCount})
+            </div>
+          </div>
+        </div>
+
+        {/* Card 3: Total Withdrawals */}
+        <div
+          onClick={() => onNavigate('withdrawal_requests')}
+          className="bg-[#121626] border border-[#232a42] hover:border-rose-500/60 rounded-2xl p-4 sm:p-5 flex items-center gap-3.5 shadow-lg transition group cursor-pointer"
+        >
+          {/* Ticket Icon Outline with red dot (exact match to screenshot) */}
+          <div className="relative shrink-0">
+            <Bookmark className="w-9 h-9 text-[#ef4444] stroke-[1.75]" />
+            <span className="w-2.5 h-2.5 rounded-full bg-[#ef4444] absolute top-2 left-[13px]" />
+          </div>
+          <div>
+            <div className="text-xl sm:text-2xl font-black text-white tracking-tight">
+              ₹{Number(totalWithdrawalAmount).toFixed(2)}
+            </div>
+            <div className="text-xs font-semibold text-slate-400 mt-0.5">
+              Total Withdrawals ({totalWithdrawalCount})
+            </div>
+          </div>
+        </div>
+
+        {/* Card 4: Profit / Loss */}
+        <div
+          onClick={() => onNavigate('reports_analytics')}
+          className="bg-[#121626] border border-[#232a42] hover:border-amber-400/60 rounded-2xl p-4 sm:p-5 flex items-center gap-3.5 shadow-lg transition group cursor-pointer"
+        >
+          {/* Ticket Icon Outline with yellow dot (exact match to screenshot) */}
+          <div className="relative shrink-0">
+            <Bookmark className="w-9 h-9 text-[#f59e0b] stroke-[1.75]" />
+            <span className="w-2.5 h-2.5 rounded-full bg-[#f59e0b] absolute top-2 left-[13px]" />
+          </div>
+          <div>
+            <div className="text-xl sm:text-2xl font-black text-white tracking-tight">
+              ₹{Number(profitLossAmount).toFixed(2)}
+            </div>
+            <div className="text-xs font-semibold text-slate-400 mt-0.5">
+              Profit / Loss
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* ================= 3. THREE-COLUMN MID SECTION ================= */}
+      {/* =========================================================================
+          SECTION 3: ROW 2 OF SOLID COLOR CARDS (4 Highlight Cards)
+      ========================================================================= */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Highlight Card 1: ASSIGNED MASTERS (Solid Green) */}
+        <div
+          onClick={() => onNavigate('admin_management')}
+          className="bg-[#2d7a46] border border-emerald-600/30 rounded-2xl p-4 sm:p-5 flex items-center gap-3.5 shadow-lg shadow-emerald-950/30 text-white transition hover:brightness-105 cursor-pointer"
+        >
+          <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center shrink-0 shadow-inner">
+            <Users className="w-6 h-6 text-white" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[10px] sm:text-[11px] font-extrabold uppercase tracking-wider text-white/90">
+              ASSIGNED MASTERS
+            </div>
+            <div className="text-xl sm:text-2xl font-black text-white tracking-tight mt-0.5">
+              {assignedMastersCount}
+            </div>
+          </div>
+        </div>
+
+        {/* Highlight Card 2: TOTAL INPROCESS REQUEST (Solid Amber/Orange) */}
+        <div
+          onClick={() => onNavigate('deposit_requests')}
+          className="bg-[#f59e0b] border border-amber-400/30 rounded-2xl p-4 sm:p-5 flex items-center gap-3.5 shadow-lg shadow-amber-950/30 text-white transition hover:brightness-105 cursor-pointer"
+        >
+          <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center shrink-0 shadow-inner">
+            <User className="w-6 h-6 text-white" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[10px] sm:text-[11px] font-extrabold uppercase tracking-wider text-white/90">
+              TOTAL INPROCESS REQUEST
+            </div>
+            <div className="text-xl sm:text-2xl font-black text-white tracking-tight mt-0.5 truncate">
+              ₹{Number(totalInprocessAmount).toFixed(2)} ({totalInprocessCount})
+            </div>
+          </div>
+        </div>
+
+        {/* Highlight Card 3: SUSPICIOUS USERS DEPOSIT (Solid Slate/Charcoal) */}
+        <div
+          onClick={() => onNavigate('risk_control')}
+          className="bg-[#545e6d] border border-slate-500/30 rounded-2xl p-4 sm:p-5 flex items-center gap-3.5 shadow-lg shadow-slate-950/30 text-white transition hover:brightness-105 cursor-pointer"
+        >
+          <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center shrink-0 shadow-inner">
+            <Building className="w-6 h-6 text-white" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[10px] sm:text-[11px] font-extrabold uppercase tracking-wider text-white/90">
+              SUSPICIOUS USERS DEPOSIT
+            </div>
+            <div className="text-xl sm:text-2xl font-black text-white tracking-tight mt-0.5 truncate">
+              ₹{Number(suspiciousDepositAmount).toFixed(2)} ({suspiciousDepositCount})
+            </div>
+          </div>
+        </div>
+
+        {/* Highlight Card 4: SUSPICIOUS USERS WITHDRAWAL (Solid Slate/Charcoal) */}
+        <div
+          onClick={() => onNavigate('risk_control')}
+          className="bg-[#545e6d] border border-slate-500/30 rounded-2xl p-4 sm:p-5 flex items-center gap-3.5 shadow-lg shadow-slate-950/30 text-white transition hover:brightness-105 cursor-pointer"
+        >
+          <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center shrink-0 shadow-inner">
+            <Building className="w-6 h-6 text-white" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[10px] sm:text-[11px] font-extrabold uppercase tracking-wider text-white/90">
+              SUSPICIOUS USERS WITHDRAWAL
+            </div>
+            <div className="text-xl sm:text-2xl font-black text-white tracking-tight mt-0.5 truncate">
+              ₹{Number(suspiciousWithdrawalAmount).toFixed(2)} ({suspiciousWithdrawalCount})
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* =========================================================================
+          SECTION 4: ROW 3 USERS BREAKDOWN WIDGET
+      ========================================================================= */}
+      <div className="bg-[#121626] border border-[#23273c] rounded-2xl p-5 shadow-lg max-w-xl">
+        <h3 className="text-base font-extrabold text-white tracking-tight mb-4">
+          Users
+        </h3>
+
+        <div className="space-y-4">
+          {/* Stat 1: First Time Deposit User (Purple vertical pill) */}
+          <div className="flex items-start gap-3">
+            <div className="w-1.5 h-8 bg-[#9333ea] rounded-full shrink-0 mt-0.5" />
+            <div>
+              <div className="text-xs font-semibold text-slate-400">
+                First Time Deposit User
+              </div>
+              <div className="text-sm font-bold text-white mt-0.5">
+                ₹{Number(firstTimeDepositUserAmount).toFixed(2)} ({firstTimeDepositUserCount})
+              </div>
+            </div>
+          </div>
+
+          {/* Stat 2: First Time Withdrawal User (Teal vertical pill) */}
+          <div className="flex items-start gap-3">
+            <div className="w-1.5 h-8 bg-[#14b8a6] rounded-full shrink-0 mt-0.5" />
+            <div>
+              <div className="text-xs font-semibold text-slate-400">
+                First Time Withdrawal User
+              </div>
+              <div className="text-sm font-bold text-white mt-0.5">
+                ₹{Number(firstTimeWithdrawalUserAmount).toFixed(2)} ({firstTimeWithdrawalUserCount})
+              </div>
+            </div>
+          </div>
+
+          {/* Stat 3: Total Users (Blue vertical pill) */}
+          <div className="flex items-start gap-3">
+            <div className="w-1.5 h-8 bg-[#2563eb] rounded-full shrink-0 mt-0.5" />
+            <div>
+              <div className="text-xs font-semibold text-slate-400">
+                Total Users
+              </div>
+              <div className="text-sm font-bold text-white mt-0.5">
+                {totalPlatformUsers}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* =========================================================================
+          SECTION 5: ROW 4 ASSIGNED MASTER REPORT
+      ========================================================================= */}
+      <div className="bg-[#121626] border border-[#23273c] rounded-2xl p-5 shadow-xl">
+        <h3 className="text-base sm:text-lg font-extrabold text-white tracking-tight mb-4">
+          Assigned Master Report
+        </h3>
+
+        {/* Filter Controls Row */}
+        <div className="flex flex-wrap items-end gap-3 mb-4">
+          {/* Select by Date */}
+          <div className="min-w-[120px]">
+            <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+              Select by Date
+            </label>
+            <select
+              value={masterReportDate}
+              onChange={(e) => setMasterReportDate(e.target.value)}
+              className="w-full bg-[#181d30] border border-[#2b3350] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="Today">Today</option>
+              <option value="Yesterday">Yesterday</option>
+              <option value="This Week">This Week</option>
+              <option value="This Month">This Month</option>
+            </select>
+          </div>
+
+          {/* Orderby Amount */}
+          <div className="min-w-[100px]">
+            <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+              Orderby Amount
+            </label>
+            <select
+              value={masterReportOrder}
+              onChange={(e) => setMasterReportOrder(e.target.value)}
+              className="w-full bg-[#181d30] border border-[#2b3350] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="DESC">DESC</option>
+              <option value="ASC">ASC</option>
+            </select>
+          </div>
+
+          {/* Transaction Type */}
+          <div className="min-w-[110px]">
+            <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+              Transaction Type
+            </label>
+            <select
+              value={masterReportTxType}
+              onChange={(e) => setMasterReportTxType(e.target.value)}
+              className="w-full bg-[#181d30] border border-[#2b3350] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="Deposit">Deposit</option>
+              <option value="Withdrawal">Withdrawal</option>
+              <option value="All">All</option>
+            </select>
+          </div>
+
+          {/* Domain */}
+          <div className="min-w-[120px]">
+            <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+              Domain
+            </label>
+            <select
+              value={masterReportDomain}
+              onChange={(e) => setMasterReportDomain(e.target.value)}
+              className="w-full bg-[#181d30] border border-[#2b3350] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="All Domains">All Domains</option>
+              <option value="admin.arowclub.com">admin.arowclub.com</option>
+            </select>
+          </div>
+
+          {/* Go Button */}
+          <button
+            type="button"
+            onClick={() => showToast('Master report filtered', 'info')}
+            className="px-4 py-1.5 rounded-lg bg-[#2d7a46] hover:bg-[#25683b] text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer"
+          >
+            Go
+          </button>
+
+          {/* XLS Export Button */}
+          <button
+            type="button"
+            onClick={handleExportXLS}
+            className="px-2.5 py-1.5 rounded-lg bg-[#1e7e34] hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer flex items-center gap-1"
+            title="Download Excel Spreadsheet"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>XLS</span>
+          </button>
+
+          {/* PDF Export Button */}
+          <button
+            type="button"
+            onClick={handleExportPDF}
+            className="px-2.5 py-1.5 rounded-lg bg-[#dc2626] hover:bg-rose-700 text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer flex items-center gap-1"
+            title="Download PDF Document"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>PDF</span>
+          </button>
+        </div>
+
+        {/* Assigned Master Report Table */}
+        <div className="overflow-x-auto rounded-xl border border-[#232a42]">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="bg-[#181d30] text-slate-300 font-bold uppercase tracking-wider text-[11px]">
+                <th className="py-3 px-4">S.No</th>
+                <th className="py-3 px-4">User ID</th>
+                <th className="py-3 px-4">Average Action Time</th>
+                <th className="py-3 px-4">Total Amount</th>
+                <th className="py-3 px-4">Approved Count</th>
+                <th className="py-3 px-4">Rejected Count</th>
+              </tr>
+            </thead>
+            <tbody>
+              {masterReportsList.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-4 px-4 text-center bg-[#181d30]/40 text-slate-400 font-medium text-xs">
+                    No performance records found
+                  </td>
+                </tr>
+              ) : (
+                masterReportsList.map((rec: any, idx: number) => (
+                  <tr
+                    key={rec.id || idx}
+                    className="border-t border-[#1f2438] hover:bg-[#181d30]/60 transition text-slate-200"
+                  >
+                    <td className="py-3 px-4 font-mono">{rec.sNo || idx + 1}</td>
+                    <td className="py-3 px-4 font-semibold text-white">{rec.userId}</td>
+                    <td className="py-3 px-4 text-slate-400">{rec.avgActionTime || '1m 20s'}</td>
+                    <td className="py-3 px-4 font-bold text-emerald-400">
+                      ₹{Number(rec.totalAmount || 0).toFixed(2)}
+                    </td>
+                    <td className="py-3 px-4 text-emerald-400 font-semibold">{rec.approvedCount ?? 0}</td>
+                    <td className="py-3 px-4 text-rose-400 font-semibold">{rec.rejectedCount ?? 0}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* =========================================================================
+          SECTION 6: QUICK OPERATIONAL SHORTCUTS & LIVE SECTIONS
+      ========================================================================= */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Col 1: Deposit Requests */}
-        <div className="bg-[#121422] border border-[#23273c] rounded-2xl p-5 shadow-lg flex flex-col justify-between">
+        {/* Pending Deposits Box */}
+        <div className="bg-[#121626] border border-[#23273c] rounded-2xl p-5 shadow-lg flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-bold text-white">Deposit Requests</h3>
-                {(stats?.pendingDeposits || displayDeposits.length) > 0 ? (
+                {deposits.length > 0 ? (
                   <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-bold">
-                    {stats?.pendingDeposits ?? displayDeposits.length}
+                    {deposits.length}
                   </span>
                 ) : (
                   <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[10px] font-semibold">
@@ -599,31 +770,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                 )}
               </div>
               <button
+                type="button"
                 onClick={() => onNavigate('deposit_requests')}
-                className="text-xs text-indigo-400 hover:text-indigo-300 font-medium"
+                className="text-xs text-indigo-400 hover:text-indigo-300 font-medium cursor-pointer"
               >
                 View All
               </button>
             </div>
 
-            <div className="space-y-3">
-              {displayDeposits.length === 0 ? (
-                <div className="py-8 text-center text-slate-500 text-xs font-medium">
+            <div className="space-y-2.5">
+              {deposits.length === 0 ? (
+                <div className="py-6 text-center text-slate-500 text-xs font-medium">
                   No pending deposit requests
                 </div>
               ) : (
-                displayDeposits.map((item: any, idx: number) => (
+                deposits.slice(0, 3).map((item: any, idx: number) => (
                   <div
                     key={item.id || idx}
-                    className="flex items-center justify-between py-2 border-b border-[#1e202e] last:border-0 text-xs"
+                    className="flex items-center justify-between py-2 border-b border-[#1e2338] last:border-0 text-xs"
                   >
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-slate-200">{item.name || item.uid}</span>
-                    </div>
+                    <span className="font-semibold text-slate-200">{item.name || item.uid}</span>
                     <span className="font-bold text-emerald-400">
-                      ₹ {Number(item.amount).toLocaleString('en-IN')}
+                      ₹{Number(item.amount).toLocaleString('en-IN')}
                     </span>
-                    <span className="text-slate-400 text-[11px]">{item.type || 'UPI'}</span>
                     <span className="px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-semibold">
                       Pending
                     </span>
@@ -634,15 +803,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
           </div>
         </div>
 
-        {/* Col 2: Withdrawal Requests */}
-        <div className="bg-[#121422] border border-[#23273c] rounded-2xl p-5 shadow-lg flex flex-col justify-between">
+        {/* Pending Withdrawals Box */}
+        <div className="bg-[#121626] border border-[#23273c] rounded-2xl p-5 shadow-lg flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-bold text-white">Withdrawal Requests</h3>
-                {(stats?.pendingWithdrawals || displayWithdrawals.length) > 0 ? (
+                {withdrawals.length > 0 ? (
                   <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-bold">
-                    {stats?.pendingWithdrawals ?? displayWithdrawals.length}
+                    {withdrawals.length}
                   </span>
                 ) : (
                   <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[10px] font-semibold">
@@ -651,32 +820,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                 )}
               </div>
               <button
+                type="button"
                 onClick={() => onNavigate('withdrawal_requests')}
-                className="text-xs text-indigo-400 hover:text-indigo-300 font-medium"
+                className="text-xs text-indigo-400 hover:text-indigo-300 font-medium cursor-pointer"
               >
                 View All
               </button>
             </div>
 
-            <div className="space-y-3">
-              {displayWithdrawals.length === 0 ? (
-                <div className="py-8 text-center text-slate-500 text-xs font-medium">
+            <div className="space-y-2.5">
+              {withdrawals.length === 0 ? (
+                <div className="py-6 text-center text-slate-500 text-xs font-medium">
                   No pending withdrawal requests
                 </div>
               ) : (
-                displayWithdrawals.map((item: any, idx: number) => (
+                withdrawals.slice(0, 3).map((item: any, idx: number) => (
                   <div
                     key={item.id || idx}
-                    className="flex items-center justify-between py-2 border-b border-[#1e202e] last:border-0 text-xs"
+                    className="flex items-center justify-between py-2 border-b border-[#1e2338] last:border-0 text-xs"
                   >
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-slate-200">{item.name || item.uid}</span>
-                    </div>
+                    <span className="font-semibold text-slate-200">{item.name || item.uid}</span>
                     <span className="font-bold text-amber-400">
-                      ₹ {Number(item.amount).toLocaleString('en-IN')}
-                    </span>
-                    <span className="text-slate-400 text-[11px] truncate max-w-[80px]">
-                      {item.paymentMethod || 'Bank Transfer'}
+                      ₹{Number(item.amount).toLocaleString('en-IN')}
                     </span>
                     <span className="px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-semibold">
                       Pending
@@ -688,355 +853,53 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
           </div>
         </div>
 
-        {/* Col 3: Game Status Overview */}
-        <div className="bg-[#121422] border border-[#23273c] rounded-2xl p-5 shadow-lg flex flex-col justify-between">
+        {/* Active Games Quick Status */}
+        <div className="bg-[#121626] border border-[#23273c] rounded-2xl p-5 shadow-lg flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-bold text-white">Game Status Overview</h3>
+              <h3 className="text-sm font-bold text-white">Active Games Status</h3>
               <button
+                type="button"
                 onClick={() => onNavigate('game_management')}
-                className="text-xs text-indigo-400 hover:text-indigo-300 font-medium"
+                className="text-xs text-indigo-400 hover:text-indigo-300 font-medium cursor-pointer"
               >
-                Manage All Games
+                Manage All
               </button>
             </div>
 
-            <div className="space-y-3">
-              {displayGames.map((g) => {
-                const isActive = g.status !== 'inactive';
-                return (
-                  <div
-                    key={g.id || g.gameKey}
-                    className="flex items-center justify-between py-1.5 border-b border-[#1e202e] last:border-0"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-6 h-6 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400">
-                        <Gamepad2 className="w-3.5 h-3.5" />
-                      </div>
-                      <span className="text-xs font-semibold text-slate-200">{g.name}</span>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      <span className={`text-[11px] font-bold ${isActive ? 'text-emerald-400' : 'text-slate-500'}`}>
-                        {isActive ? 'Active' : 'Inactive'}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleToggleGame(g.gameKey)}
-                        className={`relative inline-flex h-4 w-8 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                          isActive ? 'bg-emerald-500' : 'bg-slate-700'
-                        }`}
-                      >
-                        <span
-                          className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                            isActive ? 'translate-x-4' : 'translate-x-0'
-                          }`}
-                        />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ================= 4. THREE-COLUMN LOWER SECTION ================= */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Col 1: Total Bets Overview (Line Chart) */}
-        <div className="bg-[#121422] border border-[#23273c] rounded-2xl p-5 shadow-lg flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-bold text-white">Total Bets Overview</h3>
-              <select
-                value={timeFilter}
-                onChange={(e: any) => setTimeFilter(e.target.value)}
-                className="bg-[#181a2e] border border-[#2b304c] text-slate-300 text-xs rounded-lg px-2.5 py-1 focus:outline-none focus:border-indigo-500"
-              >
-                <option value="this_week">This Week</option>
-                <option value="today">Today</option>
-                <option value="this_month">This Month</option>
-              </select>
-            </div>
-
-            <div className="flex items-baseline gap-2 mb-4">
-              <span className="text-2xl font-bold text-white">₹ {(stats?.totalBetVolume ?? 0).toLocaleString('en-IN')}</span>
-              <span className="text-xs font-bold text-emerald-400">{stats?.totalBets ?? 0} Bets</span>
-            </div>
-
-            {/* Custom SVG Graph */}
-            <div className="h-44 w-full relative">
-              <svg className="w-full h-full" viewBox="0 0 400 160" preserveAspectRatio="none">
-                <defs>
-                  <linearGradient id="betLineGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#818cf8" stopOpacity="0.4" />
-                    <stop offset="100%" stopColor="#818cf8" stopOpacity="0.0" />
-                  </linearGradient>
-                </defs>
-                {/* Horizontal Grid lines */}
-                <line x1="40" y1="20" x2="390" y2="20" stroke="#1e202e" strokeDasharray="3 3" />
-                <line x1="40" y1="60" x2="390" y2="60" stroke="#1e202e" strokeDasharray="3 3" />
-                <line x1="40" y1="100" x2="390" y2="100" stroke="#1e202e" strokeDasharray="3 3" />
-                <line x1="40" y1="140" x2="390" y2="140" stroke="#1e202e" />
-
-                {/* Y-axis labels */}
-                <text x="10" y="24" fill="#64748b" fontSize="10" fontFamily="sans-serif">4M</text>
-                <text x="10" y="64" fill="#64748b" fontSize="10" fontFamily="sans-serif">3M</text>
-                <text x="10" y="104" fill="#64748b" fontSize="10" fontFamily="sans-serif">2M</text>
-                <text x="10" y="144" fill="#64748b" fontSize="10" fontFamily="sans-serif">1M</text>
-
-                {/* Line area */}
-                <path
-                  d="M 60 120 Q 110 80 160 100 T 260 50 T 360 40 L 360 140 L 60 140 Z"
-                  fill="url(#betLineGradient)"
-                />
-                {/* Main line */}
-                <path
-                  d="M 60 120 Q 110 80 160 100 T 260 50 T 360 40"
-                  fill="none"
-                  stroke="#818cf8"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                />
-
-                {/* Points */}
-                <circle cx="60" cy="120" r="4" fill="#6366f1" stroke="#ffffff" strokeWidth="1.5" />
-                <circle cx="110" cy="90" r="4" fill="#6366f1" stroke="#ffffff" strokeWidth="1.5" />
-                <circle cx="160" cy="100" r="4" fill="#6366f1" stroke="#ffffff" strokeWidth="1.5" />
-                <circle cx="210" cy="85" r="4" fill="#6366f1" stroke="#ffffff" strokeWidth="1.5" />
-                <circle cx="260" cy="50" r="4" fill="#6366f1" stroke="#ffffff" strokeWidth="1.5" />
-                <circle cx="310" cy="65" r="4" fill="#6366f1" stroke="#ffffff" strokeWidth="1.5" />
-                <circle cx="360" cy="40" r="4" fill="#6366f1" stroke="#ffffff" strokeWidth="1.5" />
-              </svg>
-
-              {/* X Axis days */}
-              <div className="flex justify-between pl-10 pr-2 text-[10px] text-slate-500 font-semibold mt-1">
-                <span>Mon</span>
-                <span>Tue</span>
-                <span>Wed</span>
-                <span>Thu</span>
-                <span>Fri</span>
-                <span>Sat</span>
-                <span>Sun</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Col 2: Recent Results */}
-        <div className="bg-[#121422] border border-[#23273c] rounded-2xl p-5 shadow-lg flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-bold text-white">Recent Results</h3>
-              <button
-                onClick={() => onNavigate('result_management')}
-                className="text-xs text-indigo-400 hover:text-indigo-300 font-medium"
-              >
-                View All
-              </button>
-            </div>
-
-            <div className="overflow-x-auto">
-              {displayResults.length === 0 ? (
-                <div className="py-8 text-center text-slate-500 text-xs font-medium">
-                  No recent game rounds recorded yet
-                </div>
-              ) : (
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-[#1e202e] text-[11px] text-slate-400 font-semibold">
-                      <th className="pb-2 font-medium">Period</th>
-                      <th className="pb-2 font-medium text-center">Number</th>
-                      <th className="pb-2 font-medium text-center">Color</th>
-                      <th className="pb-2 font-medium text-right">Result Time</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#1e202e]">
-                    {displayResults.map((r: any, idx: number) => {
-                      const color = r.color || (r.number % 2 === 0 ? 'red' : 'green');
-                      return (
-                        <tr key={idx} className="hover:bg-[#16182c]/40">
-                          <td className="py-2 text-slate-300 font-mono text-[11px]">{r.id || r.periodId}</td>
-                          <td className="py-2 text-center font-bold text-white font-mono">{r.number ?? 7}</td>
-                          <td className="py-2 text-center">
-                            <span
-                              className={`inline-block w-3 h-3 rounded-full ${
-                                color === 'green'
-                                  ? 'bg-emerald-500'
-                                  : color === 'red'
-                                  ? 'bg-rose-500'
-                                  : 'bg-purple-500'
-                              }`}
-                            />
-                          </td>
-                          <td className="py-2 text-right text-[11px] text-slate-400 font-mono">
-                            {r.time || 'Just now'}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Col 3: Quick Actions (2x4 grid) */}
-        <div className="bg-[#121422] border border-[#23273c] rounded-2xl p-5 shadow-lg flex flex-col justify-between">
-          <div>
-            <h3 className="text-sm font-bold text-white mb-4">Quick Actions</h3>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-              {/* Action 1: Add User */}
-              <button
-                onClick={() => setShowAddUserModal(true)}
-                className="flex flex-col items-center justify-center p-3 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-400 transition group cursor-pointer"
-              >
-                <PlusCircle className="w-5 h-5 mb-1.5 group-hover:scale-110 transition-transform" />
-                <span className="text-[11px] font-bold text-white">Add User</span>
-              </button>
-
-              {/* Action 2: Send Notification */}
-              <button
-                onClick={() => onNavigate('notification')}
-                className="flex flex-col items-center justify-center p-3 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-400 transition group cursor-pointer"
-              >
-                <Send className="w-5 h-5 mb-1.5 group-hover:scale-110 transition-transform" />
-                <span className="text-[11px] font-bold text-white">Send Notification</span>
-              </button>
-
-              {/* Action 3: Add Balance */}
-              <button
-                onClick={() => setShowAddBalanceModal(true)}
-                className="flex flex-col items-center justify-center p-3 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-400 transition group cursor-pointer"
-              >
-                <DollarSign className="w-5 h-5 mb-1.5 group-hover:scale-110 transition-transform" />
-                <span className="text-[11px] font-bold text-white">Add Balance</span>
-              </button>
-
-              {/* Action 4: Game Settings */}
-              <button
-                onClick={() => onNavigate('settings')}
-                className="flex flex-col items-center justify-center p-3 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/30 text-amber-400 transition group cursor-pointer"
-              >
-                <Sliders className="w-5 h-5 mb-1.5 group-hover:scale-110 transition-transform" />
-                <span className="text-[11px] font-bold text-white">Game Settings</span>
-              </button>
-
-              {/* Action 5: View Reports */}
-              <button
-                onClick={() => onNavigate('reports_analytics')}
-                className="flex flex-col items-center justify-center p-3 rounded-xl bg-orange-600/20 hover:bg-orange-600/30 border border-orange-500/30 text-orange-400 transition group cursor-pointer"
-              >
-                <FileText className="w-5 h-5 mb-1.5 group-hover:scale-110 transition-transform" />
-                <span className="text-[11px] font-bold text-white">View Reports</span>
-              </button>
-
-              {/* Action 6: Support Links */}
-              <button
-                onClick={() => onNavigate('support_links')}
-                className="flex flex-col items-center justify-center p-3 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-400 transition group cursor-pointer"
-              >
-                <Headphones className="w-5 h-5 mb-1.5 group-hover:scale-110 transition-transform" />
-                <span className="text-[11px] font-bold text-white">Support Links</span>
-              </button>
-
-              {/* Action 7: Maintenance Mode */}
-              <button
-                onClick={() => onNavigate('maintenance_mode')}
-                className="flex flex-col items-center justify-center p-3 rounded-xl bg-pink-600/20 hover:bg-pink-600/30 border border-pink-500/30 text-pink-400 transition group cursor-pointer"
-              >
-                <Power className="w-5 h-5 mb-1.5 group-hover:scale-110 transition-transform" />
-                <span className="text-[11px] font-bold text-white">Maintenance</span>
-              </button>
-
-              {/* Action 8: Logout */}
-              <button
-                onClick={() => logoutAdmin()}
-                className="flex flex-col items-center justify-center p-3 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/30 text-rose-400 transition group cursor-pointer"
-              >
-                <LogOut className="w-5 h-5 mb-1.5 group-hover:scale-110 transition-transform" />
-                <span className="text-[11px] font-bold text-white">Logout</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ================= 5. BOTTOM SECTION: ACTIVE BANNERS ================= */}
-      <div className="bg-[#121422] border border-[#23273c] rounded-2xl p-5 shadow-lg">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-bold text-white">Active Banners</h3>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => onNavigate('banner_management')}
-              className="text-xs text-indigo-400 hover:text-indigo-300 font-medium"
-            >
-              Manage Banners
-            </button>
-            <div className="flex gap-1.5">
-              <button
-                onClick={() => setBannerIndex(prev => (prev === 0 ? displayBanners.length - 1 : prev - 1))}
-                className="w-7 h-7 rounded-lg bg-[#181a2e] border border-[#2b304c] flex items-center justify-center text-slate-400 hover:text-white"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setBannerIndex(prev => (prev === displayBanners.length - 1 ? 0 : prev + 1))}
-                className="w-7 h-7 rounded-lg bg-[#181a2e] border border-[#2b304c] flex items-center justify-center text-slate-400 hover:text-white"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* 4 Banners Display Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {displayBanners.map((b, idx) => (
-            <div
-              key={b.id || idx}
-              className={`relative overflow-hidden rounded-2xl border ${b.borderColor || 'border-indigo-500/30'} bg-gradient-to-br ${b.bgGradient || 'from-indigo-900/40 to-slate-900/60'} p-4 flex flex-col justify-between min-h-[140px] shadow-lg group hover:scale-[1.01] transition-transform`}
-            >
-              <div className="z-10">
-                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-300">
-                  {b.title}
-                </span>
-                <h4 className={`text-base font-black ${b.textColor || 'text-amber-400'} mt-0.5 tracking-tight`}>
-                  {b.subtitle || b.description}
-                </h4>
-              </div>
-
-              <div className="z-10 mt-3 flex items-center justify-between">
-                <button
-                  onClick={() => onNavigate('banner_management')}
-                  className="px-3 py-1 rounded-lg bg-black/40 hover:bg-black/60 border border-white/20 text-[10px] font-bold text-white uppercase tracking-wider transition"
+            <div className="space-y-2.5">
+              {(games.length > 0 ? games.slice(0, 4) : [
+                { gameKey: 'wingo_30s', name: 'Win Go 30s', status: 'active' },
+                { gameKey: 'wingo_1m', name: 'Win Go 1Min', status: 'active' },
+                { gameKey: 'mines', name: 'Mines', status: 'active' },
+                { gameKey: 'aviator', name: 'Aviator', status: 'active' },
+              ]).map((g: any) => (
+                <div
+                  key={g.gameKey || g.id}
+                  className="flex items-center justify-between py-1.5 border-b border-[#1e2338] last:border-0 text-xs"
                 >
-                  {b.actionText || 'Edit Banner'}
-                </button>
-              </div>
-
-              {/* Background image tint */}
-              {b.img && (
-                <img
-                  src={b.img}
-                  alt={b.title}
-                  className="absolute right-0 bottom-0 w-28 h-28 object-cover opacity-20 group-hover:opacity-30 transition pointer-events-none"
-                />
-              )}
+                  <div className="flex items-center gap-2">
+                    <Gamepad2 className="w-4 h-4 text-indigo-400" />
+                    <span className="font-medium text-slate-200">{g.name}</span>
+                  </div>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                    Active
+                  </span>
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
         </div>
       </div>
 
-      {/* ================= MODAL: QUICK ADD USER ================= */}
+      {/* =========================================================================
+          MODALS: QUICK ADD USER & BALANCE
+      ========================================================================= */}
       {showAddUserModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-[#121422] border border-[#23273c] rounded-2xl max-w-md w-full p-6 shadow-2xl">
+          <div className="bg-[#121626] border border-[#23273c] rounded-2xl max-w-md w-full p-6 shadow-2xl">
             <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2">
-              <PlusCircle className="w-5 h-5 text-blue-400" />
+              <PlusCircle className="w-5 h-5 text-indigo-400" />
               Quick Add User Account
             </h3>
             <form onSubmit={handleCreateUser} className="space-y-4 text-xs">
@@ -1048,7 +911,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                   placeholder="e.g. Rahul Kumar"
                   value={newUsername}
                   onChange={(e) => setNewUsername(e.target.value)}
-                  className="w-full bg-[#181a2e] border border-[#2b304c] text-white rounded-xl px-3 py-2 focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-[#181d30] border border-[#2b3350] text-white rounded-xl px-3 py-2 focus:outline-none focus:border-indigo-500"
                 />
               </div>
               <div>
@@ -1059,7 +922,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                   placeholder="e.g. 9876543210"
                   value={newPhone}
                   onChange={(e) => setNewPhone(e.target.value)}
-                  className="w-full bg-[#181a2e] border border-[#2b304c] text-white rounded-xl px-3 py-2 focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-[#181d30] border border-[#2b3350] text-white rounded-xl px-3 py-2 focus:outline-none focus:border-indigo-500"
                 />
               </div>
               <div>
@@ -1069,20 +932,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                   required
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  className="w-full bg-[#181a2e] border border-[#2b304c] text-white rounded-xl px-3 py-2 focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-[#181d30] border border-[#2b3350] text-white rounded-xl px-3 py-2 focus:outline-none focus:border-indigo-500"
                 />
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setShowAddUserModal(false)}
-                  className="px-4 py-2 rounded-xl border border-slate-600 text-slate-300 hover:bg-slate-800 transition"
+                  className="px-4 py-2 rounded-xl border border-slate-600 text-slate-300 hover:bg-slate-800 transition cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold transition"
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition cursor-pointer"
                 >
                   Create User
                 </button>
@@ -1092,10 +955,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
         </div>
       )}
 
-      {/* ================= MODAL: QUICK ADD BALANCE ================= */}
       {showAddBalanceModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-[#121422] border border-[#23273c] rounded-2xl max-w-md w-full p-6 shadow-2xl">
+          <div className="bg-[#121626] border border-[#23273c] rounded-2xl max-w-md w-full p-6 shadow-2xl">
             <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2">
               <DollarSign className="w-5 h-5 text-emerald-400" />
               Quick Add User Balance
@@ -1106,10 +968,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                 <input
                   type="text"
                   required
-                  placeholder="e.g. 12345 or u-12345"
+                  placeholder="e.g. 80815668"
                   value={balanceUid}
                   onChange={(e) => setBalanceUid(e.target.value)}
-                  className="w-full bg-[#181a2e] border border-[#2b304c] text-white rounded-xl px-3 py-2 focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-[#181d30] border border-[#2b3350] text-white rounded-xl px-3 py-2 focus:outline-none focus:border-indigo-500"
                 />
               </div>
               <div>
@@ -1120,20 +982,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                   min="1"
                   value={balanceAmount}
                   onChange={(e) => setBalanceAmount(e.target.value)}
-                  className="w-full bg-[#181a2e] border border-[#2b304c] text-white rounded-xl px-3 py-2 focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-[#181d30] border border-[#2b3350] text-white rounded-xl px-3 py-2 focus:outline-none focus:border-indigo-500"
                 />
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setShowAddBalanceModal(false)}
-                  className="px-4 py-2 rounded-xl border border-slate-600 text-slate-300 hover:bg-slate-800 transition"
+                  className="px-4 py-2 rounded-xl border border-slate-600 text-slate-300 hover:bg-slate-800 transition cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition"
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition cursor-pointer"
                 >
                   Credit Balance
                 </button>

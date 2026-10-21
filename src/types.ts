@@ -539,6 +539,8 @@ export interface SupportTicket {
   resolvedBy?: string;
   isAiHandled?: boolean;
   escalatedToAdmin?: boolean;
+  adminTypingUntil?: number;
+  userTypingUntil?: number;
   messages: SupportMessage[];
   createdAt: string;
 }
@@ -664,6 +666,8 @@ export interface WithdrawalRequest {
   processedBy?: string;
   createdAt: string;
   updatedAt?: string;
+  utrReference?: string;
+  payoutRef?: string;
   requiredTurnover?: number;
   completedTurnover?: number;
   remainingTurnover?: number;

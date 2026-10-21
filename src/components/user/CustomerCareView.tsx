@@ -37,11 +37,12 @@ const isHindiQuery = (text: string): boolean => {
     'aayega', 'aaya', 'fasa', 'fas', 'nahi', 'karo', 'kaise', 'batao', 'bat',
     'baat', 'karna', 'kare', 'mujhe', 'kya', 'kyun', 'nikasi', 'namaste', 'bhai',
     'bataiye', 'dena', 'chahiye', 'jodo', 'aaye', 'plz', 'kar do', 'madad',
-    'problem', 'dikkat', 'nhi', 'gya', 'gaya', 'hua', 'kardo', 'jaldi'
+    'problem', 'dikkat', 'nhi', 'gya', 'gaya', 'hua', 'kardo', 'jaldi', 'kitna',
+    'bacha', 'baki', 'stuts', 'stutes', 'hai', 'hain'
   ];
   const lower = text.toLowerCase();
-  const words = lower.split(/[\s,?.!]+/);
-  return hinglishKeywords.some((w) => words.includes(w) || lower.includes(w));
+  const words = lower.split(/[^a-zA-Z0-9\u0900-\u097F]+/);
+  return hinglishKeywords.some((w) => words.includes(w));
 };
 
 export const CustomerCareView: React.FC<CustomerCareViewProps> = ({
@@ -69,6 +70,8 @@ export const CustomerCareView: React.FC<CustomerCareViewProps> = ({
 
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [isAdminTyping, setIsAdminTyping] = useState(false);
+  const [isEscalated, setIsEscalated] = useState(false);
   const [isWaitingTeammate, setIsWaitingTeammate] = useState(false);
   const [waitingLanguage, setWaitingLanguage] = useState<'hi' | 'en'>('en');
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
@@ -90,7 +93,7 @@ export const CustomerCareView: React.FC<CustomerCareViewProps> = ({
     if (subView === 'chat') {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, subView, isTyping, isWaitingTeammate]);
+  }, [messages, subView, isTyping, isAdminTyping, isWaitingTeammate]);
 
   // Mark messages as seen when chat view is opened
   useEffect(() => {
@@ -98,34 +101,46 @@ export const CustomerCareView: React.FC<CustomerCareViewProps> = ({
     setUnreadCount(0);
   }, [subView]);
 
-  // Fetch backend chat & check unread count
+  // Fetch backend chat & sync admin typing status
   useEffect(() => {
-    const fetchBackendChat = async () => {
+    let isMounted = true;
+    const syncChat = async () => {
       try {
         const res: any = await api.getMySupportChat();
-        if (res?.ticket?.messages && res.ticket.messages.length > 0) {
-          const mapped: ChatMessage[] = res.ticket.messages.map((m: any) => ({
-            id: m.id || String(Math.random()),
-            sender: m.sender === 'user' ? 'user' : 'agent',
-            text: m.message || '',
-            timestamp: m.timestamp || new Date().toISOString(),
-            mediaUrl: m.mediaUrl,
-            mediaType: m.mediaType,
-            fileName: m.fileName,
-            subtext: m.sender === 'user' ? undefined : `${brandName} Support • AI Agent • Just now`,
-          }));
-          if (mapped.length > 0) {
+        if (!isMounted) return;
+        if (typeof res?.adminTyping === 'boolean') {
+          setIsAdminTyping(res.adminTyping);
+        }
+        if (res?.ticket) {
+          setIsEscalated(Boolean(res.ticket.escalatedToAdmin));
+          if (res.ticket.messages && res.ticket.messages.length > 0) {
+            const mapped: ChatMessage[] = res.ticket.messages.map((m: any) => ({
+              id: m.id || String(Math.random()),
+              sender: m.sender === 'user' ? 'user' : 'agent',
+              text: m.message || '',
+              timestamp: m.timestamp || new Date().toISOString(),
+              mediaUrl: m.mediaUrl,
+              mediaType: m.mediaType,
+              fileName: m.fileName,
+              subtext: m.sender === 'user' ? undefined : (m.sender === 'admin' ? `${brandName} Official Admin Desk • Live` : `${brandName} Support • AI Agent`),
+            }));
             setMessages(mapped);
           }
-        }
-        if (typeof res?.ticket?.unreadCountByUser === 'number') {
-          setUnreadCount(res.ticket.unreadCountByUser);
+          if (typeof res.ticket.unreadCountByUser === 'number') {
+            setUnreadCount(res.ticket.unreadCountByUser);
+          }
         }
       } catch {
         // use local
       }
     };
-    fetchBackendChat();
+
+    syncChat();
+    const interval = setInterval(syncChat, 2000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, [brandName]);
 
   const handleSendMessage = async (textToSend?: string) => {
@@ -151,76 +166,38 @@ export const CustomerCareView: React.FC<CustomerCareViewProps> = ({
     setInputText('');
     setMediaPreview(null);
     setShowEmojiPicker(false);
-    setIsWaitingTeammate(true);
     setIsTyping(true);
 
-    // Call backend API in background
-    api.sendSupportMessage({
-      message: content,
-      mediaUrl: mediaPreview?.url,
-      mediaType: mediaPreview ? 'image' : undefined,
-      fileName: mediaPreview?.fileName,
-    }).catch(() => {});
+    try {
+      const res: any = await api.sendSupportMessage({
+        message: content,
+        mediaUrl: userMsg.mediaUrl,
+        mediaType: userMsg.mediaType,
+        fileName: userMsg.fileName,
+      });
 
-    // 1st Automatic AI Reply: Acknowledge & tell user to wait (Language-aware)
-    setTimeout(() => {
-      const waitText = isHindi
-        ? `${brandName} Support me contact karne ke liye dhanyawad. Kripya 2-5 minutes wait karein, hamare support officer aapki sahayata ke liye connect ho rahe hain...`
-        : `${brandName} typically replies in under 5m. Please wait while our teammate reviews your request...`;
-
-      const ackMsg: ChatMessage = {
-        id: `m-ack-${Date.now()}`,
-        sender: 'agent',
-        text: waitText,
-        timestamp: new Date().toISOString(),
-        subtext: `Fin • AI Agent • Just now`,
-      };
-      setMessages((prev) => [...prev, ackMsg]);
-      setIsTyping(false);
-
-      // 2nd Automatic Assistance Message (Language-aware response in Hinglish / English)
-      setTimeout(() => {
-        const lower = content.toLowerCase();
-        let followUp = '';
-
-        if (isHindi) {
-          // HINDI LANGUAGE WRITTEN IN ENGLISH ALPHABET (HINGLISH)
-          if (lower.includes('deposit') || lower.includes('recharge') || lower.includes('utr') || lower.includes('paisa') || lower.includes('add')) {
-            followUp = `💳 Deposit Help: Minimum recharge ₹100 hai. UPI QR se payment karne ke baad 12-digit UTR number submit karein. Agar payment slip bheji hai toh 2-5 minutes me aapke wallet me balance add ho jayega.`;
-          } else if (lower.includes('withdraw') || lower.includes('nikasi') || lower.includes('bank') || lower.includes('nikal')) {
-            followUp = `💸 Withdrawal Help: Minimum withdrawal ₹100 hai. Apne Bank Account details (Holder Name, Account No, IFSC) check karein. Withdrawals 24/7 fast process hote hain.`;
-          } else if (lower.includes('password') || lower.includes('pass') || lower.includes('login') || lower.includes('khul')) {
-            followUp = `🔒 Password Help: Account safety ke liye direct password change band hai. Kripya apna registered mobile number ya UID yahan share karein, admin team turant help karegi.`;
-          } else if (lower.includes('hii') || lower.includes('hi') || lower.includes('hello') || lower.includes('namaste')) {
-            followUp = `Namaste! 🙏 Hum aapki kya sahayata kar sakte hain? Aap Recharge/Deposit, Withdrawal, Game Rules ya Live Admin se baat karne ke liye puchh sakte hain.`;
-          } else {
-            followUp = `Aapki problem note kar li gayi hai. Hamare live support officer aapki chat dekh rahe hain aur jald hi connect honge. Aap apna payment slip ya UTR number bhi bhej sakte hain.`;
-          }
-        } else {
-          // ENGLISH RESPONSES
-          if (lower.includes('deposit') || lower.includes('recharge') || lower.includes('utr') || lower.includes('money') || lower.includes('add')) {
-            followUp = `💳 Deposit Assistance: Minimum recharge is ₹100. After paying via UPI QR, please submit the exact 12-digit UTR number. If you uploaded a receipt, our team will verify and credit your wallet within 2-5 minutes.`;
-          } else if (lower.includes('withdraw') || lower.includes('bank') || lower.includes('payout')) {
-            followUp = `💸 Withdrawal Assistance: Minimum withdrawal is ₹100. Please ensure your Bank Account details (Name, Account No, IFSC) match correctly. Payouts are processed 24/7.`;
-          } else if (lower.includes('password') || lower.includes('pass') || lower.includes('login')) {
-            followUp = `🔒 Account Security: Direct password resets from the login page are restricted for safety. Please share your registered phone number or UID here and our admin will assist you.`;
-          } else if (lower.includes('hii') || lower.includes('hi') || lower.includes('hello')) {
-            followUp = `Hello! 👋 How can we help you today? You can ask about Deposit, Withdrawal, Game Rules, or connect with a live teammate.`;
-          } else {
-            followUp = `Thank you for reaching out! Our support teammate has received your request and will review it shortly. Feel free to attach screenshots or UTR receipts if applicable.`;
-          }
+      if (res?.ticket) {
+        setIsEscalated(Boolean(res.ticket.escalatedToAdmin));
+        if (res.ticket.messages && res.ticket.messages.length > 0) {
+          const mapped: ChatMessage[] = res.ticket.messages.map((m: any) => ({
+            id: m.id || String(Math.random()),
+            sender: m.sender === 'user' ? 'user' : 'agent',
+            text: m.message || '',
+            timestamp: m.timestamp || new Date().toISOString(),
+            mediaUrl: m.mediaUrl,
+            mediaType: m.mediaType,
+            fileName: m.fileName,
+            subtext: m.sender === 'user' ? undefined : (m.sender === 'admin' ? `${brandName} Official Admin Desk • Live` : `${brandName} Support • AI Agent`),
+          }));
+          setMessages(mapped);
         }
-
-        const smartMsg: ChatMessage = {
-          id: `m-smart-${Date.now()}`,
-          sender: 'agent',
-          text: followUp,
-          timestamp: new Date().toISOString(),
-          subtext: `${brandName} Support • Just now`,
-        };
-        setMessages((prev) => [...prev, smartMsg]);
-      }, 1200);
-    }, 700);
+      }
+    } catch {
+      // offline fallback
+    } finally {
+      setIsTyping(false);
+      setIsWaitingTeammate(false);
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -244,16 +221,18 @@ export const CustomerCareView: React.FC<CustomerCareViewProps> = ({
     e.target.value = '';
   };
 
-  const handleClearChat = () => {
+  const handleClearChat = async () => {
+    await api.clearUserSupportChat().catch(() => {});
     setMessages([]);
     localStorage.removeItem(`customer_care_msgs_${user?.uid || 'guest'}`);
     setIsWaitingTeammate(false);
+    setIsEscalated(false);
     setShowOptionsMenu(false);
-    showToast?.('Conversation cleared', 'info');
+    showToast?.('Conversation cleared. AI Assistant ready.', 'info');
   };
 
-  const handleStartNewChat = () => {
-    api.startNewUserSupportChat().catch(() => {});
+  const handleStartNewChat = async () => {
+    await api.startNewUserSupportChat().catch(() => {});
     setMessages([
       {
         id: `m-welcome-${Date.now()}`,
@@ -264,6 +243,7 @@ export const CustomerCareView: React.FC<CustomerCareViewProps> = ({
       },
     ]);
     setIsWaitingTeammate(false);
+    setIsEscalated(false);
     setShowOptionsMenu(false);
     showToast?.('Started a new conversation', 'success');
   };
@@ -271,19 +251,28 @@ export const CustomerCareView: React.FC<CustomerCareViewProps> = ({
   const emojis = ['👍', '❤️', '🙏', '😊', '🔥', '⚡', '💰', '💳', '❓', '✅'];
 
   // ==========================================
-  // VIEW 1: HOME VIEW (Yellow/Gold Luxury Theme)
+  // VIEW 1: HOME VIEW (Yellow/Gold Luxury Theme) - Dedicated Full Page
   // ==========================================
   if (subView === 'home') {
     return (
-      <div className="fixed inset-0 z-[10000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4 animate-fadeIn">
-        <div className="relative w-full h-full sm:h-[680px] sm:max-w-md bg-white sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-amber-500/20">
+      <div className="fixed inset-0 z-50 bg-[#faf8f2] flex flex-col w-full max-w-md mx-auto h-[100dvh] max-h-[100dvh] overflow-hidden overscroll-none select-none touch-pan-y shadow-2xl">
+        <div className="relative w-full h-full bg-[#faf8f2] flex flex-col flex-1 overflow-hidden">
           {/* Top Yellow/Gold & Black Luxury Hero Section */}
-          <div className="relative bg-gradient-to-b from-[#1c1809] via-[#2c220a] to-[#141106] text-white pt-5 pb-14 px-5 border-b border-[#f5c443]/30">
-            {/* Top Bar: VIP Support Avatar on left (NO static number 1!), 'X' on right */}
+          <div className="relative bg-gradient-to-b from-[#1c1809] via-[#2c220a] to-[#141106] text-white pt-5 pb-14 px-5 border-b border-[#f5c443]/30 shrink-0">
+            {/* Top Bar: Back & VIP Support Avatar on left, 'X' on right */}
             <div className="flex items-center justify-between">
-              {/* VIP Support Badge - Gold Theme without hardcoded numbers */}
-              <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-[#d99b26] to-[#f5c443] flex items-center justify-center text-black font-black text-sm shadow-[0_0_15px_rgba(245,196,67,0.4)]">
-                <Headphones className="w-5 h-5 text-black stroke-[2.5]" />
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={onClose}
+                  className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-all active:scale-90"
+                  aria-label="Back"
+                >
+                  <ChevronLeft className="w-5 h-5 text-white" />
+                </button>
+                {/* VIP Support Badge - Gold Theme */}
+                <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-[#d99b26] to-[#f5c443] flex items-center justify-center text-black font-black text-sm shadow-[0_0_15px_rgba(245,196,67,0.4)]">
+                  <Headphones className="w-5 h-5 text-black stroke-[2.5]" />
+                </div>
               </div>
 
               {/* Close Button */}
@@ -374,7 +363,25 @@ export const CustomerCareView: React.FC<CustomerCareViewProps> = ({
                     <ChevronRight className="w-4 h-4 text-amber-600" />
                   </button>
 
-                  {/* Topic 3: Telegram Support */}
+                  {/* Topic 3: Rolling Turnover Inquiry */}
+                  <button
+                    onClick={() => {
+                      setSubView('chat');
+                      handleSendMessage('Mera rolling status kitna bacha hai? (Rolling status)');
+                    }}
+                    className="w-full bg-amber-50/50 hover:bg-amber-50 rounded-xl p-3 border border-amber-200/50 flex items-center justify-between text-left transition-all text-xs"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-base">🔄</span>
+                      <div>
+                        <div className="font-semibold text-gray-800">Rolling Turnover Status</div>
+                        <div className="text-[10px] text-gray-500">Check remaining incomplete rolling</div>
+                      </div>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-amber-600" />
+                  </button>
+
+                  {/* Topic 4: Telegram Support */}
                   <a
                     href={supportTelegram}
                     target="_blank"
@@ -399,7 +406,10 @@ export const CustomerCareView: React.FC<CustomerCareViewProps> = ({
                       <div className="w-2 h-2 rounded-full bg-emerald-500" />
                       <span>UID: <strong className="text-gray-900 font-mono">{user.uid}</strong></span>
                     </div>
-                    <span>Phone: <strong className="text-gray-900 font-mono">{user.phone || 'Guest'}</strong></span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                      <span className="text-[11px] font-semibold text-amber-800">VIP Verified</span>
+                    </div>
                   </div>
                 )}
               </>
@@ -474,13 +484,13 @@ export const CustomerCareView: React.FC<CustomerCareViewProps> = ({
   }
 
   // ==========================================
-  // VIEW 2 & 3: CHAT CONVERSATION VIEW (Yellow Theme)
+  // VIEW 2 & 3: CHAT CONVERSATION VIEW (Yellow Theme) - Dedicated Full Page
   // ==========================================
   return (
-    <div className="fixed inset-0 z-[10000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4 animate-fadeIn">
-      <div className="relative w-full h-full sm:h-[680px] sm:max-w-md bg-white sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-amber-500/20">
+    <div className="fixed inset-0 z-50 bg-white flex flex-col w-full max-w-md mx-auto h-[100dvh] max-h-[100dvh] overflow-hidden overscroll-none select-none touch-pan-y shadow-2xl">
+      <div className="relative w-full h-full bg-white flex flex-col flex-1 overflow-hidden">
         {/* Top Header Bar */}
-        <div className="px-3 py-3 border-b border-gray-200 bg-white flex items-center justify-between shrink-0">
+        <div className="px-3 py-3 border-b border-gray-200 bg-white flex items-center justify-between shrink-0 shadow-xs z-20">
           <div className="flex items-center gap-2 min-w-0">
             {/* Back Chevron '<' to return to Home view */}
             <button
@@ -502,11 +512,15 @@ export const CustomerCareView: React.FC<CustomerCareViewProps> = ({
             <div className="min-w-0">
               <div className="font-bold text-gray-900 text-xs sm:text-sm truncate leading-tight flex items-center gap-1.5">
                 <span>{brandName} Support</span>
-                <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-800 font-bold">24/7</span>
+                {isEscalated ? (
+                  <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-rose-100 text-rose-800 font-bold animate-pulse">Live Admin</span>
+                ) : (
+                  <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-800 font-bold">24/7 AI</span>
+                )}
               </div>
               <div className="text-[10px] text-gray-500 flex items-center gap-1 mt-0.5">
                 <Clock className="w-2.5 h-2.5 text-amber-600" />
-                <span>Under 5 minutes</span>
+                <span>{isEscalated ? 'Live Desk Connected' : 'Under 5 minutes'}</span>
               </div>
             </div>
           </div>
@@ -563,8 +577,8 @@ export const CustomerCareView: React.FC<CustomerCareViewProps> = ({
           </div>
         </div>
 
-        {/* Chat Area */}
-        <div className="flex-1 overflow-y-auto px-3.5 py-4 space-y-4 bg-white">
+        {/* Chat Area - Buttery smooth non-shaking scroll container */}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-3.5 py-4 space-y-3.5 bg-[#fbfbfa] overscroll-contain scroll-smooth touch-pan-y">
           {/* Top Subtle Centered Text */}
           <div className="text-center text-xs text-gray-500 py-2 px-4 leading-relaxed select-none">
             Ask us anything, or share your feedback.
@@ -616,6 +630,18 @@ export const CustomerCareView: React.FC<CustomerCareViewProps> = ({
             );
           })}
 
+          {/* Admin Typing Indicator */}
+          {isAdminTyping && (
+            <div className="flex flex-col items-start animate-fadeIn">
+              <div className="flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-amber-50 text-amber-900 border border-amber-200 text-xs font-semibold shadow-sm">
+                <span className="text-[11px] font-bold">Official Admin Desk typing</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-[#d99b26] animate-bounce" />
+                <span className="w-1.5 h-1.5 rounded-full bg-[#d99b26] animate-bounce [animation-delay:0.2s]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-[#d99b26] animate-bounce [animation-delay:0.4s]" />
+              </div>
+            </div>
+          )}
+
           {/* Typing Indicator */}
           {isTyping && (
             <div className="flex items-center gap-1.5 p-3 rounded-2xl bg-[#f4f5f7] text-amber-500 w-16 animate-pulse">
@@ -627,16 +653,6 @@ export const CustomerCareView: React.FC<CustomerCareViewProps> = ({
 
           <div ref={chatEndRef} />
         </div>
-
-        {/* Waiting status indicator (NO static number 1!) */}
-        {isWaitingTeammate && (
-          <div className="px-4 py-1.5 bg-amber-50/70 border-t border-amber-200/60 flex items-center justify-center gap-2 text-xs text-amber-900 animate-fadeIn">
-            <div className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
-            <span className="text-[11px] font-semibold">
-              {waitingLanguage === 'hi' ? 'Support officer se connect ho rahe hain...' : 'Waiting for a teammate...'}
-            </span>
-          </div>
-        )}
 
         {/* Media Preview before sending */}
         {mediaPreview && (
@@ -673,20 +689,25 @@ export const CustomerCareView: React.FC<CustomerCareViewProps> = ({
         )}
 
         {/* Bottom Input Area Box - Golden / Yellow Border matching user request */}
-        <div className="p-3 bg-white shrink-0">
+        <div className="p-3 bg-white border-t border-gray-100 shrink-0 z-20">
           <div className="border-2 border-[#f5c443] rounded-2xl p-2.5 bg-white shadow-sm flex flex-col gap-2 transition-all focus-within:ring-2 focus-within:ring-[#f5c443]/30">
             {/* Input field */}
             <input
               type="text"
               value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
+              onChange={(e) => {
+                setInputText(e.target.value);
+                if (e.target.value.trim()) {
+                  api.setSupportTyping('user', true).catch(() => {});
+                }
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
                   handleSendMessage();
                 }
               }}
-              placeholder="Message..."
+              placeholder={isEscalated ? "Type message to live admin desk..." : "Message..."}
               className="w-full text-xs sm:text-sm text-gray-900 placeholder-gray-400 bg-transparent outline-none px-1"
             />
 
@@ -725,7 +746,7 @@ export const CustomerCareView: React.FC<CustomerCareViewProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    handleSendMessage('डिपॉजिट नहीं आया, UTR चेक करें (Deposit not credited)');
+                    handleSendMessage('Deposit nahi aaya, UTR check karein (Deposit status)');
                   }}
                   className="hover:text-amber-600 transition-colors text-[10px] font-black tracking-wider px-1 py-0.5 rounded border border-amber-300 text-amber-700"
                   title="Quick preset questions"

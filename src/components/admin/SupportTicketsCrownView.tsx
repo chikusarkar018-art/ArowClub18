@@ -657,6 +657,14 @@ export const SupportTicketsCrownView: React.FC = () => {
                     </div>
                   );
                 })}
+                {/* Client Typing Indicator in Admin Panel */}
+                {(selectedTicket as any).userTypingUntil && (selectedTicket as any).userTypingUntil > Date.now() && (
+                  <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 animate-pulse w-fit">
+                    <span className="font-semibold">{selectedTicket.username} is typing...</span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-bounce" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-bounce [animation-delay:0.2s]" />
+                  </div>
+                )}
                 <div ref={chatEndRef} />
               </div>
 
@@ -707,7 +715,12 @@ export const SupportTicketsCrownView: React.FC = () => {
                   type="text"
                   placeholder="Type an official admin reply to customer..."
                   value={replyText}
-                  onChange={(e) => setReplyText(e.target.value)}
+                  onChange={(e) => {
+                    setReplyText(e.target.value);
+                    if (selectedTicket?.uid && e.target.value.trim()) {
+                      api.setSupportTyping('admin', true, selectedTicket.uid).catch(() => {});
+                    }
+                  }}
                   className="flex-1 h-10 px-3.5 rounded-xl bg-[#1a1a1e] border border-[#26262a] text-xs text-white placeholder-[#71717a] focus:outline-none focus:border-amber-500/50 transition-colors"
                 />
 
