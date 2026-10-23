@@ -524,6 +524,62 @@ class ApiService {
     });
   }
 
+  async getAccountStatement(uid?: string, params?: {
+    transactionType?: string;
+    gameType?: string;
+    startDate?: string;
+    endDate?: string;
+    search?: string;
+  }) {
+    const q = new URLSearchParams();
+    if (uid) q.append('uid', uid);
+    if (params?.transactionType && params.transactionType !== 'all') q.append('transactionType', params.transactionType);
+    if (params?.gameType && params.gameType !== 'all') q.append('gameType', params.gameType);
+    if (params?.startDate) q.append('startDate', params.startDate);
+    if (params?.endDate) q.append('endDate', params.endDate);
+    if (params?.search) q.append('search', params.search);
+
+    const queryStr = q.toString() ? `?${q.toString()}` : '';
+    return this.request<{
+      success: boolean;
+      user: {
+        uid: string;
+        username: string;
+        phone: string;
+        walletBalance: number;
+        status: string;
+        registrationDate?: string;
+      };
+      openingBalance: number;
+      closingBalance: number;
+      totalCredit: number;
+      totalDebit: number;
+      totalEntries: number;
+      entries: Array<{
+        id: string;
+        timestamp: number;
+        dateStr: string;
+        timeStr: string;
+        dateTimeFormatted: string;
+        credit: number | null;
+        debit: number | null;
+        closingBalance: number;
+        description: string;
+        ref: string;
+        fromTo: string;
+        category: string;
+        gameType?: string;
+      }>;
+      allUsers: Array<{
+        uid: string;
+        username: string;
+        phone: string;
+        walletBalance: number;
+        status: string;
+      }>;
+    }>(`/api/admin/account-statement${queryStr}`);
+  }
+
   async getAdminUserExposure(uid: string) {
     return this.request<{
       success: boolean;

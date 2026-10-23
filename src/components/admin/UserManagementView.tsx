@@ -7,7 +7,7 @@ import {
   ChevronLeft, ChevronRight, X, Phone, Mail, Calendar, ArrowRight,
   RefreshCw, UserPlus, Sparkles, Key, ArrowDownCircle, ArrowUpCircle,
   Copy, Check, Gamepad2, Sliders, PlayCircle, BarChart3, TrendingUp, TrendingDown,
-  Info, ShieldCheck, Layers, Coins, Lock, Unlock, AlertTriangle, Trash2
+  Info, ShieldCheck, Layers, Coins, Lock, Unlock, AlertTriangle, Trash2, FileSpreadsheet
 } from 'lucide-react';
 import { AdminUserSummary } from '../../types.js';
 import { PaginationControl } from './PaginationControl.js';
@@ -31,9 +31,10 @@ export const ALL_AVAILABLE_GAMES = [
 interface UserManagementViewProps {
   initialStatusFilter?: string;
   onViewUserDetails?: (uid: string) => void;
+  onViewUserStatement?: (uid: string) => void;
 }
 
-export const UserManagementView: React.FC<UserManagementViewProps> = ({ initialStatusFilter, onViewUserDetails }) => {
+export const UserManagementView: React.FC<UserManagementViewProps> = ({ initialStatusFilter, onViewUserDetails, onViewUserStatement }) => {
   const { admin, showToast } = useAuth();
   const [users, setUsers] = useState<AdminUserSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -566,6 +567,13 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({ initialS
     displayUsers.sort((a, b) => Number(b.exposure !== undefined ? b.exposure : b.activeExposure || 0) - Number(a.exposure !== undefined ? a.exposure : a.activeExposure || 0));
   } else if (exposureSort === 'asc') {
     displayUsers.sort((a, b) => Number(a.exposure !== undefined ? a.exposure : a.activeExposure || 0) - Number(b.exposure !== undefined ? b.exposure : b.activeExposure || 0));
+  } else {
+    // Default: Newest registered clients ALWAYS at the top
+    displayUsers.sort((a, b) => {
+      const timeA = a.registrationDate ? new Date(a.registrationDate).getTime() : 0;
+      const timeB = b.registrationDate ? new Date(b.registrationDate).getTime() : 0;
+      return timeB - timeA;
+    });
   }
   const totalPages = Math.max(1, Math.ceil(displayUsers.length / pageSize));
   const paginatedUsers = displayUsers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -748,6 +756,20 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({ initialS
               </select>
               <span>entries</span>
             </div>
+
+            {/* Statement Report (Dark Teal button #004d5a) */}
+            <button
+              onClick={() => {
+                if (onViewUserStatement) {
+                  onViewUserStatement(searchUidInput.trim() || searchQuery.trim() || '');
+                }
+              }}
+              className="px-3 py-1 rounded bg-[#004d5a] hover:bg-[#003740] text-white text-xs font-bold transition shadow-xs flex items-center gap-1 cursor-pointer"
+              title="Open Account Statement & Game History Report"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>Statement Report</span>
+            </button>
 
             {/* Add Client Account (Teal button) */}
             <button
@@ -1132,6 +1154,21 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({ initialS
                             title="User Profile (U)"
                           >
                             U
+                          </button>
+
+                          {/* S (Account Statement & Game History) - Dark Teal Square #004d5a */}
+                          <button
+                            onClick={() => {
+                              if (onViewUserStatement) {
+                                onViewUserStatement(u.uid);
+                              } else if (onViewUserDetails) {
+                                onViewUserDetails(u.uid);
+                              }
+                            }}
+                            className="w-6 h-6 rounded bg-[#004d5a] hover:bg-[#003842] text-white flex items-center justify-center font-black text-xs shadow-xs cursor-pointer"
+                            title="Account Statement Report & Game History (S)"
+                          >
+                            S
                           </button>
 
                           {/* D|C (Deposit / Credit) - Green Square */}

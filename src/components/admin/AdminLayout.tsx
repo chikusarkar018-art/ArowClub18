@@ -162,6 +162,14 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
       icon: Users,
     },
     {
+      id: 'account_statement',
+      label: 'Account Statement',
+      fullLabel: 'Account Statement Report (गेम हिस्ट्री)',
+      icon: FileSpreadsheet,
+      badge: 'REPORT',
+      badgeType: 'yellow',
+    },
+    {
       id: 'first_deposit_bonus_management',
       label: 'First Deposit Bon...',
       fullLabel: 'First Deposit Bonus',
@@ -234,6 +242,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
     const item = navItems.find((n) => n.id === currentTab);
     if (item) return item.fullLabel || item.label;
     if (currentTab === 'user_details_view') return 'User Details';
+    if (currentTab === 'account_statement') return 'Account Statement Report';
     if (currentTab === 'support_desk') return 'Live Support Desk';
     if (currentTab === 'maintenance_mode') return 'Maintenance Mode';
     return 'Dashboard';

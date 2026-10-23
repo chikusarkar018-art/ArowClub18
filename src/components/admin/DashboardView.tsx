@@ -6,14 +6,16 @@ import {
   Bookmark, Settings, FileSpreadsheet, FileText, RefreshCw,
   PlusCircle, DollarSign, ChevronRight, ChevronLeft,
   Calendar, Layers, Gamepad2, ArrowRight, ShieldCheck,
-  CheckCircle2, Clock, Download, MessageSquare, ExternalLink
+  CheckCircle2, Clock, Download, MessageSquare, ExternalLink,
+  Search, Copy, Check, Sparkles, UserPlus, Wallet
 } from 'lucide-react';
 
 interface DashboardViewProps {
   onNavigate: (tab: string) => void;
+  onViewUserStatement?: (uid: string) => void;
 }
 
-export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
+export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onViewUserStatement }) => {
   const { admin, showToast } = useAuth();
   const [stats, setStats] = useState<any>(null);
   const [games, setGames] = useState<any[]>([]);
@@ -27,6 +29,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
   const [quickSelect, setQuickSelect] = useState<string>('Today');
   const [selectedDomain, setSelectedDomain] = useState<string>('All Domains');
   const [isLoadingStats, setIsLoadingStats] = useState<boolean>(false);
+
+  // Registered Client Users live state (UID & Balance)
+  const [clientUsersList, setClientUsersList] = useState<any[]>([]);
+  const [activeTableTab, setActiveTableTab] = useState<'client_users' | 'master_report'>('client_users');
+  const [userSearchText, setUserSearchText] = useState<string>('');
+  const [copiedUid, setCopiedUid] = useState<string | null>(null);
+  const [isRefreshingUsers, setIsRefreshingUsers] = useState<boolean>(false);
 
   // Assigned Master Report filter states
   const [masterReportDate, setMasterReportDate] = useState<string>('Today');
@@ -84,7 +93,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
       if (quickSelect === 'Yesterday') periodParam = 'yesterday';
       else if (quickSelect === 'This Month') periodParam = 'this_month';
 
-      const [statsData, gamesData, depData, withData, resData, banData] = await Promise.allSettled([
+      const [statsData, gamesData, depData, withData, resData, banData, usersData] = await Promise.allSettled([
         api.getAdminStats({
           periodType: periodParam,
         }),
@@ -93,6 +102,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
         api.getAdminWithdrawals('pending'),
         api.getAdminResults('wingo_30s'),
         api.getAdminBanners(),
+        api.getAdminUsers(),
       ]);
 
       if (statsData.status === 'fulfilled' && statsData.value) {
@@ -100,6 +110,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
         if (statsData.value.assignedMasterReport) {
           setMasterReportsList(statsData.value.assignedMasterReport);
         }
+      }
+      if (usersData.status === 'fulfilled' && usersData.value?.users) {
+        setClientUsersList(usersData.value.users);
       }
       if (gamesData.status === 'fulfilled' && gamesData.value?.games) {
         setGames(gamesData.value.games);
@@ -120,6 +133,30 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
       // ignore
     } finally {
       setIsLoadingStats(false);
+    }
+  };
+
+  const handleCopyUid = (uid: string) => {
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(uid);
+    }
+    setCopiedUid(uid);
+    showToast(`UID ${uid} copied to clipboard`, 'success');
+    setTimeout(() => setCopiedUid(null), 2000);
+  };
+
+  const handleManualRefreshUsers = async () => {
+    setIsRefreshingUsers(true);
+    try {
+      const data = await api.getAdminUsers();
+      if (data?.users) {
+        setClientUsersList(data.users);
+        showToast(`Loaded ${data.users.length} registered client accounts`, 'success');
+      }
+    } catch {
+      showToast('Failed to refresh registered users', 'error');
+    } finally {
+      setIsRefreshingUsers(false);
     }
   };
 
@@ -222,7 +259,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
   const firstTimeWithdrawalUserAmount = stats?.firstTimeWithdrawalUserAmount ?? 0.0;
   const firstTimeWithdrawalUserCount = stats?.firstTimeWithdrawalUserCount ?? 0;
 
-  const totalPlatformUsers = stats?.totalUsers ?? stats?.daily?.totalUsers ?? 2;
+  const totalPlatformUsers = clientUsersList.length || stats?.totalUsers || stats?.daily?.totalUsers || 0;
 
   return (
     <div className="space-y-6 text-slate-100 pb-12">
@@ -588,14 +625,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
           </div>
 
           {/* Stat 3: Total Users (Blue vertical pill) */}
-          <div className="flex items-start gap-3">
+          <div
+            onClick={() => {
+              setActiveTableTab('client_users');
+              document.getElementById('dashboard-registered-users-section')?.scrollIntoView({ behavior: 'smooth' });
+            }}
+            className="flex items-start gap-3 cursor-pointer hover:bg-white/5 p-2 rounded-xl transition border border-transparent hover:border-blue-500/30"
+            title="Click to view all registered client accounts below"
+          >
             <div className="w-1.5 h-8 bg-[#2563eb] rounded-full shrink-0 mt-0.5" />
             <div>
-              <div className="text-xs font-semibold text-slate-400">
-                Total Users
+              <div className="text-xs font-semibold text-slate-400 flex items-center gap-1.5">
+                Total Users (Client Accounts)
+                <span className="text-[9px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Click to View</span>
               </div>
-              <div className="text-sm font-bold text-white mt-0.5">
-                {totalPlatformUsers}
+              <div className="text-sm font-bold text-white mt-0.5 flex items-center gap-2">
+                <span>{totalPlatformUsers}</span>
+                <span className="text-xs font-normal text-slate-400">registered IDs</span>
               </div>
             </div>
           </div>
@@ -603,150 +649,407 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
       </div>
 
       {/* =========================================================================
-          SECTION 5: ROW 4 ASSIGNED MASTER REPORT
+          SECTION 5: CLIENT ACCOUNTS (UID & BALANCE) & ASSIGNED MASTER REPORT
       ========================================================================= */}
-      <div className="bg-[#121626] border border-[#23273c] rounded-2xl p-5 shadow-xl">
-        <h3 className="text-base sm:text-lg font-extrabold text-white tracking-tight mb-4">
-          Assigned Master Report
-        </h3>
-
-        {/* Filter Controls Row */}
-        <div className="flex flex-wrap items-end gap-3 mb-4">
-          {/* Select by Date */}
-          <div className="min-w-[120px]">
-            <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-              Select by Date
-            </label>
-            <select
-              value={masterReportDate}
-              onChange={(e) => setMasterReportDate(e.target.value)}
-              className="w-full bg-[#181d30] border border-[#2b3350] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+      <div id="dashboard-registered-users-section" className="bg-[#121626] border border-[#23273c] rounded-2xl p-5 shadow-xl space-y-4">
+        {/* Tab Selection Header */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#232a42] pb-4">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setActiveTableTab('client_users')}
+              className={`px-4 py-2 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition cursor-pointer ${
+                activeTableTab === 'client_users'
+                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-950/40 border border-emerald-400/40'
+                  : 'bg-[#181d30] text-slate-400 hover:text-white border border-[#2b3350]'
+              }`}
             >
-              <option value="Today">Today</option>
-              <option value="Yesterday">Yesterday</option>
-              <option value="This Week">This Week</option>
-              <option value="This Month">This Month</option>
-            </select>
+              <Users className="w-4 h-4 text-emerald-300" />
+              <span>Registered Client Accounts (यूआईडी और बैलेंस)</span>
+              <span className="px-2 py-0.5 rounded-full bg-black/40 text-emerald-200 text-xs font-mono font-bold">
+                {clientUsersList.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTableTab('master_report')}
+              className={`px-4 py-2 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition cursor-pointer ${
+                activeTableTab === 'master_report'
+                  ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-lg shadow-indigo-950/40 border border-indigo-400/40'
+                  : 'bg-[#181d30] text-slate-400 hover:text-white border border-[#2b3350]'
+              }`}
+            >
+              <FileSpreadsheet className="w-4 h-4 text-indigo-300" />
+              <span>Assigned Master Report</span>
+              <span className="px-2 py-0.5 rounded-full bg-black/40 text-indigo-200 text-xs font-mono font-bold">
+                {masterReportsList.length}
+              </span>
+            </button>
           </div>
 
-          {/* Orderby Amount */}
-          <div className="min-w-[100px]">
-            <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-              Orderby Amount
-            </label>
-            <select
-              value={masterReportOrder}
-              onChange={(e) => setMasterReportOrder(e.target.value)}
-              className="w-full bg-[#181d30] border border-[#2b3350] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
-            >
-              <option value="DESC">DESC</option>
-              <option value="ASC">ASC</option>
-            </select>
-          </div>
-
-          {/* Transaction Type */}
-          <div className="min-w-[110px]">
-            <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-              Transaction Type
-            </label>
-            <select
-              value={masterReportTxType}
-              onChange={(e) => setMasterReportTxType(e.target.value)}
-              className="w-full bg-[#181d30] border border-[#2b3350] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
-            >
-              <option value="Deposit">Deposit</option>
-              <option value="Withdrawal">Withdrawal</option>
-              <option value="All">All</option>
-            </select>
-          </div>
-
-          {/* Domain */}
-          <div className="min-w-[120px]">
-            <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-              Domain
-            </label>
-            <select
-              value={masterReportDomain}
-              onChange={(e) => setMasterReportDomain(e.target.value)}
-              className="w-full bg-[#181d30] border border-[#2b3350] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
-            >
-              <option value="All Domains">All Domains</option>
-              <option value="admin.arowclub.com">admin.arowclub.com</option>
-            </select>
-          </div>
-
-          {/* Go Button */}
+          {/* Quick link to full User Management */}
           <button
             type="button"
-            onClick={() => showToast('Master report filtered', 'info')}
-            className="px-4 py-1.5 rounded-lg bg-[#2d7a46] hover:bg-[#25683b] text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer"
+            onClick={() => onNavigate('users_management')}
+            className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1 transition cursor-pointer"
           >
-            Go
-          </button>
-
-          {/* XLS Export Button */}
-          <button
-            type="button"
-            onClick={handleExportXLS}
-            className="px-2.5 py-1.5 rounded-lg bg-[#1e7e34] hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer flex items-center gap-1"
-            title="Download Excel Spreadsheet"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5" />
-            <span>XLS</span>
-          </button>
-
-          {/* PDF Export Button */}
-          <button
-            type="button"
-            onClick={handleExportPDF}
-            className="px-2.5 py-1.5 rounded-lg bg-[#dc2626] hover:bg-rose-700 text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer flex items-center gap-1"
-            title="Download PDF Document"
-          >
-            <FileText className="w-3.5 h-3.5" />
-            <span>PDF</span>
+            <span>Open Full User Management</span>
+            <ChevronRight className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Assigned Master Report Table */}
-        <div className="overflow-x-auto rounded-xl border border-[#232a42]">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="bg-[#181d30] text-slate-300 font-bold uppercase tracking-wider text-[11px]">
-                <th className="py-3 px-4">S.No</th>
-                <th className="py-3 px-4">User ID</th>
-                <th className="py-3 px-4">Average Action Time</th>
-                <th className="py-3 px-4">Total Amount</th>
-                <th className="py-3 px-4">Approved Count</th>
-                <th className="py-3 px-4">Rejected Count</th>
-              </tr>
-            </thead>
-            <tbody>
-              {masterReportsList.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-4 px-4 text-center bg-[#181d30]/40 text-slate-400 font-medium text-xs">
-                    No performance records found
-                  </td>
-                </tr>
-              ) : (
-                masterReportsList.map((rec: any, idx: number) => (
-                  <tr
-                    key={rec.id || idx}
-                    className="border-t border-[#1f2438] hover:bg-[#181d30]/60 transition text-slate-200"
+        {/* TAB CONTENT 1: REGISTERED CLIENT ACCOUNTS (UID & BALANCE) */}
+        {activeTableTab === 'client_users' && (
+          <div className="space-y-4">
+            {/* Filter and Action Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              {/* Search by UID / Phone / Username */}
+              <div className="relative flex-1 min-w-[220px] max-w-md">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search by UID, Phone number, or Username..."
+                  value={userSearchText}
+                  onChange={(e) => setUserSearchText(e.target.value)}
+                  className="w-full bg-[#181d30] border border-[#2b3350] rounded-xl pl-9 pr-8 py-2 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500 font-medium"
+                />
+                {userSearchText && (
+                  <button
+                    type="button"
+                    onClick={() => setUserSearchText('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs px-1 cursor-pointer"
                   >
-                    <td className="py-3 px-4 font-mono">{rec.sNo || idx + 1}</td>
-                    <td className="py-3 px-4 font-semibold text-white">{rec.userId}</td>
-                    <td className="py-3 px-4 text-slate-400">{rec.avgActionTime || '1m 20s'}</td>
-                    <td className="py-3 px-4 font-bold text-emerald-400">
-                      ₹{Number(rec.totalAmount || 0).toFixed(2)}
-                    </td>
-                    <td className="py-3 px-4 text-emerald-400 font-semibold">{rec.approvedCount ?? 0}</td>
-                    <td className="py-3 px-4 text-rose-400 font-semibold">{rec.rejectedCount ?? 0}</td>
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Action Buttons: Refresh, Add User */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleManualRefreshUsers}
+                  disabled={isRefreshingUsers}
+                  className="px-3 py-2 rounded-xl bg-[#181d30] hover:bg-[#202740] border border-[#2b3350] text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer active:scale-95 disabled:opacity-50"
+                  title="Refresh registered client list"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingUsers ? 'animate-spin text-emerald-400' : 'text-slate-400'}`} />
+                  <span>Refresh</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowAddUserModal(true)}
+                  className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-md shadow-emerald-950/30 flex items-center gap-1.5 transition cursor-pointer active:scale-95"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Create New User (नई आईडी बनाएं)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Table of Registered Users */}
+            <div className="overflow-x-auto rounded-xl border border-[#232a42]">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-[#181d30] text-slate-300 font-bold uppercase tracking-wider text-[11px] border-b border-[#232a42]">
+                    <th className="py-3 px-3.5 text-center">#</th>
+                    <th className="py-3 px-3.5">User UID (यूआईडी)</th>
+                    <th className="py-3 px-3.5">User Name & Phone</th>
+                    <th className="py-3 px-3.5 text-right">Wallet Balance (वॉलेट बैलेंस)</th>
+                    <th className="py-3 px-3.5 text-right">Total Deposit</th>
+                    <th className="py-3 px-3.5 text-center">Status</th>
+                    <th className="py-3 px-3.5">Created Date & Time</th>
+                    <th className="py-3 px-3.5 text-center">Quick Action</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody>
+                  {(() => {
+                    const filteredUsers = clientUsersList.filter(u => {
+                      if (!userSearchText.trim()) return true;
+                      const q = userSearchText.trim().toLowerCase();
+                      return (u.uid && String(u.uid).toLowerCase().includes(q)) ||
+                        (u.username && String(u.username).toLowerCase().includes(q)) ||
+                        (u.phone && String(u.phone).toLowerCase().includes(q));
+                    });
+
+                    if (filteredUsers.length === 0) {
+                      return (
+                        <tr>
+                          <td colSpan={8} className="py-8 px-4 text-center bg-[#181d30]/30 text-slate-400">
+                            <div className="flex flex-col items-center justify-center gap-2">
+                              <Users className="w-8 h-8 text-slate-600" />
+                              <div className="text-sm font-semibold text-slate-300">No client user accounts found</div>
+                              <div className="text-xs text-slate-500">
+                                {userSearchText ? 'No users matching your search query.' : 'Click "Create New User" to register a new client account.'}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    return filteredUsers.map((u: any, idx: number) => {
+                      const uidStr = String(u.uid || u.id || '').replace(/^u-/, '');
+                      const isCopied = copiedUid === uidStr;
+                      const createdDateStr = u.registrationDate
+                        ? new Date(u.registrationDate).toLocaleString('en-IN', {
+                            day: '2-digit',
+                            month: 'short',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: true,
+                          })
+                        : '—';
+
+                      return (
+                        <tr
+                          key={uidStr || idx}
+                          className="border-t border-[#1f2438] hover:bg-[#181d30]/70 transition text-slate-200"
+                        >
+                          <td className="py-3 px-3.5 text-center font-mono text-slate-400 text-xs">
+                            {idx + 1}
+                          </td>
+                          <td className="py-3 px-3.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono font-black text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-lg text-xs tracking-wide">
+                                {uidStr}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleCopyUid(uidStr)}
+                                className="text-slate-400 hover:text-white p-1 rounded hover:bg-white/10 transition cursor-pointer"
+                                title="Copy UID"
+                              >
+                                {isCopied ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            </div>
+                          </td>
+                          <td className="py-3 px-3.5">
+                            <div className="font-bold text-white text-xs">{u.username || 'Unnamed'}</div>
+                            <div className="text-[11px] text-slate-400 font-mono mt-0.5">{u.phone || 'No Phone'}</div>
+                          </td>
+                          <td className="py-3 px-3.5 text-right">
+                            <div className="text-emerald-400 font-black text-sm font-mono">
+                              ₹{Number(u.walletBalance || 0).toFixed(2)}
+                            </div>
+                          </td>
+                          <td className="py-3 px-3.5 text-right font-mono text-slate-300 font-semibold text-xs">
+                            ₹{Number(u.totalDeposit || 0).toFixed(2)}
+                          </td>
+                          <td className="py-3 px-3.5 text-center">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase ${
+                                u.status === 'blocked'
+                                  ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                                  : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                              }`}
+                            >
+                              {u.status === 'blocked' ? 'Suspended' : 'Active'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3.5 text-xs text-slate-400">
+                            {createdDateStr}
+                          </td>
+                          <td className="py-3 px-3.5 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setBalanceUid(uidStr);
+                                  setShowAddBalanceModal(true);
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] transition shadow-xs cursor-pointer flex items-center gap-1 active:scale-95"
+                                title="Add balance to user wallet"
+                              >
+                                <DollarSign className="w-3 h-3" />
+                                <span>+₹ Bal</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (onViewUserStatement) {
+                                    onViewUserStatement(uidStr);
+                                  } else {
+                                    onNavigate('account_statement');
+                                  }
+                                }}
+                                className="px-2 py-1 rounded-lg bg-teal-600/30 hover:bg-teal-600/50 border border-teal-500/40 text-teal-300 font-semibold text-[11px] transition cursor-pointer flex items-center gap-1"
+                                title="View User Account Statement & Game History (गेम हिस्ट्री)"
+                              >
+                                <FileText className="w-3 h-3 text-teal-300" />
+                                <span>History</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => onNavigate('users_management')}
+                                className="px-2 py-1 rounded-lg bg-[#181d30] hover:bg-[#202740] border border-[#2b3350] text-slate-300 hover:text-white font-semibold text-[11px] transition cursor-pointer"
+                                title="View in User Management"
+                              >
+                                View
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  })()}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* TAB CONTENT 2: ASSIGNED MASTER REPORT */}
+        {activeTableTab === 'master_report' && (
+          <div className="space-y-4">
+            {/* Filter Controls Row */}
+            <div className="flex flex-wrap items-end gap-3 mb-4">
+              {/* Select by Date */}
+              <div className="min-w-[120px]">
+                <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                  Select by Date
+                </label>
+                <select
+                  value={masterReportDate}
+                  onChange={(e) => setMasterReportDate(e.target.value)}
+                  className="w-full bg-[#181d30] border border-[#2b3350] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+                >
+                  <option value="Today">Today</option>
+                  <option value="Yesterday">Yesterday</option>
+                  <option value="This Week">This Week</option>
+                  <option value="This Month">This Month</option>
+                </select>
+              </div>
+
+              {/* Orderby Amount */}
+              <div className="min-w-[100px]">
+                <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                  Orderby Amount
+                </label>
+                <select
+                  value={masterReportOrder}
+                  onChange={(e) => setMasterReportOrder(e.target.value)}
+                  className="w-full bg-[#181d30] border border-[#2b3350] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+                >
+                  <option value="DESC">DESC</option>
+                  <option value="ASC">ASC</option>
+                </select>
+              </div>
+
+              {/* Transaction Type */}
+              <div className="min-w-[110px]">
+                <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                  Transaction Type
+                </label>
+                <select
+                  value={masterReportTxType}
+                  onChange={(e) => setMasterReportTxType(e.target.value)}
+                  className="w-full bg-[#181d30] border border-[#2b3350] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+                >
+                  <option value="Deposit">Deposit</option>
+                  <option value="Withdrawal">Withdrawal</option>
+                  <option value="All">All</option>
+                </select>
+              </div>
+
+              {/* Domain */}
+              <div className="min-w-[120px]">
+                <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                  Domain
+                </label>
+                <select
+                  value={masterReportDomain}
+                  onChange={(e) => setMasterReportDomain(e.target.value)}
+                  className="w-full bg-[#181d30] border border-[#2b3350] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+                >
+                  <option value="All Domains">All Domains</option>
+                  <option value="admin.arowclub.com">admin.arowclub.com</option>
+                </select>
+              </div>
+
+              {/* Go Button */}
+              <button
+                type="button"
+                onClick={() => showToast('Master report filtered', 'info')}
+                className="px-4 py-1.5 rounded-lg bg-[#2d7a46] hover:bg-[#25683b] text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer"
+              >
+                Go
+              </button>
+
+              {/* XLS Export Button */}
+              <button
+                type="button"
+                onClick={handleExportXLS}
+                className="px-2.5 py-1.5 rounded-lg bg-[#1e7e34] hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer flex items-center gap-1"
+                title="Download Excel Spreadsheet"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>XLS</span>
+              </button>
+
+              {/* PDF Export Button */}
+              <button
+                type="button"
+                onClick={handleExportPDF}
+                className="px-2.5 py-1.5 rounded-lg bg-[#dc2626] hover:bg-rose-700 text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer flex items-center gap-1"
+                title="Download PDF Document"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>PDF</span>
+              </button>
+            </div>
+
+            {/* Assigned Master Report Table */}
+            <div className="overflow-x-auto rounded-xl border border-[#232a42]">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-[#181d30] text-slate-300 font-bold uppercase tracking-wider text-[11px]">
+                    <th className="py-3 px-4">S.No</th>
+                    <th className="py-3 px-4">User ID</th>
+                    <th className="py-3 px-4">Average Action Time</th>
+                    <th className="py-3 px-4">Total Amount</th>
+                    <th className="py-3 px-4">Approved Count</th>
+                    <th className="py-3 px-4">Rejected Count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {masterReportsList.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-4 px-4 text-center bg-[#181d30]/40 text-slate-400 font-medium text-xs">
+                        No performance records found
+                      </td>
+                    </tr>
+                  ) : (
+                    masterReportsList.map((rec: any, idx: number) => (
+                      <tr
+                        key={rec.id || idx}
+                        className="border-t border-[#1f2438] hover:bg-[#181d30]/60 transition text-slate-200"
+                      >
+                        <td className="py-3 px-4 font-mono">{rec.sNo || idx + 1}</td>
+                        <td className="py-3 px-4 font-semibold text-white">{rec.userId}</td>
+                        <td className="py-3 px-4 text-slate-400">{rec.avgActionTime || '1m 20s'}</td>
+                        <td className="py-3 px-4 font-bold text-emerald-400">
+                          ₹{Number(rec.totalAmount || 0).toFixed(2)}
+                        </td>
+                        <td className="py-3 px-4 text-emerald-400 font-semibold">{rec.approvedCount ?? 0}</td>
+                        <td className="py-3 px-4 text-rose-400 font-semibold">{rec.rejectedCount ?? 0}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* =========================================================================

@@ -7,16 +7,18 @@ import {
   Clock, DollarSign, Wallet, ArrowDownCircle, ArrowUpCircle,
   TrendingUp, TrendingDown, Layers, History, ShieldAlert,
   ShieldCheck, CheckCircle2, XCircle, Building2, Trash2,
-  Key, Eye, EyeOff, Copy, RefreshCw, Check
+  Key, Eye, EyeOff, Copy, RefreshCw, Check, FileSpreadsheet
 } from 'lucide-react';
 import { BallView } from '../common/BallView.js';
+import { AccountStatementReportView } from './AccountStatementReportView.js';
 
 interface UserDetailsViewProps {
   uid: string;
   onBack: () => void;
+  onViewUserStatement?: (uid: string) => void;
 }
 
-export const UserDetailsView: React.FC<UserDetailsViewProps> = ({ uid, onBack }) => {
+export const UserDetailsView: React.FC<UserDetailsViewProps> = ({ uid, onBack, onViewUserStatement }) => {
   const [data, setData] = useState<{
     user: User;
     rollover?: {
@@ -325,6 +327,21 @@ export const UserDetailsView: React.FC<UserDetailsViewProps> = ({ uid, onBack })
           >
             <ArrowUpCircle className="w-3.5 h-3.5" />
             <span>- Manual Payout</span>
+          </button>
+
+          <button
+            onClick={() => {
+              if (onViewUserStatement) {
+                onViewUserStatement(user.uid);
+              } else {
+                setActiveTab('gameHistory');
+              }
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#004d5a] hover:bg-[#003842] text-white border border-teal-500/50 rounded-lg text-xs font-bold transition shadow-sm cursor-pointer"
+            title="View Account Statement Report & Game History"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-teal-200" />
+            <span>Account Statement Report</span>
           </button>
 
           <button
@@ -828,15 +845,10 @@ export const UserDetailsView: React.FC<UserDetailsViewProps> = ({ uid, onBack })
           </div>
         )}
 
-        {/* 6. Game History & 7. Login History */}
+        {/* 6. Game History (Account Statement Report) & 7. Login History */}
         {activeTab === 'gameHistory' && (
-          <div className="text-xs text-[#a1a1aa]">
-            <p className="mb-3">Recent game participation across all Win Go cycles for UID {user.uid}:</p>
-            <div className="p-4 bg-[#0a0a0b] border border-[#26262a] rounded-lg">
-              <span className="text-white font-bold">{bets.length}</span> total rounds played with turnover of{' '}
-              <span className="text-[#d4af37] font-bold">₹{user.totalBet.toLocaleString('en-IN')}</span> and payout of{' '}
-              <span className="text-emerald-400 font-bold">₹{user.totalWin.toLocaleString('en-IN')}</span>.
-            </div>
+          <div className="bg-[#121422] border border-[#23273c] rounded-2xl p-4 sm:p-6 shadow-xl">
+            <AccountStatementReportView initialUid={user.uid} />
           </div>
         )}
 

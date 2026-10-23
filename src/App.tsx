@@ -39,12 +39,14 @@ import { GiftCodeManagementView } from './components/admin/GiftCodeManagementVie
 import { FirstDepositBonusManagementView } from './components/admin/FirstDepositBonusManagementView.js';
 import { AdminGoogleSheetLedgerView } from './components/admin/AdminGoogleSheetLedgerView.js';
 import { HouseBetAndWinRateControlView } from './components/admin/HouseBetAndWinRateControlView.js';
+import { AccountStatementReportView } from './components/admin/AccountStatementReportView.js';
 import { UserGamePanel } from './components/user/UserGamePanel.js';
 
 const MainApp: React.FC = () => {
   const { activeMode, admin, showToast } = useAuth();
   const [adminTab, setAdminTab] = useState<string>('dashboard');
   const [selectedUserDetailsUid, setSelectedUserDetailsUid] = useState<string | null>(null);
+  const [selectedStatementUid, setSelectedStatementUid] = useState<string | null>(null);
 
   // If user mode is active, show the User Mobile Gaming Application
   if (activeMode === 'user') {
@@ -67,12 +69,18 @@ const MainApp: React.FC = () => {
     setAdminTab('users_management');
   };
 
+  const handleViewUserStatement = (uid: string) => {
+    setSelectedStatementUid(uid);
+    setAdminTab('account_statement');
+  };
+
   const renderAdminContent = () => {
     if (adminTab === 'user_details_view' && selectedUserDetailsUid) {
       return (
         <UserDetailsView
           uid={selectedUserDetailsUid}
           onBack={handleBackToUsers}
+          onViewUserStatement={handleViewUserStatement}
         />
       );
     }
@@ -80,13 +88,20 @@ const MainApp: React.FC = () => {
     switch (adminTab) {
       // 16 Main Sidebar Menu Items
       case 'dashboard':
-        return <DashboardView onNavigate={(tab) => setAdminTab(tab)} />;
+        return <DashboardView onNavigate={(tab) => setAdminTab(tab)} onViewUserStatement={handleViewUserStatement} />;
       case 'google_sheet_ledger':
         return <AdminGoogleSheetLedgerView showToast={showToast} />;
       case 'game_management':
         return <GameManagementView />;
       case 'users_management':
-        return <UserManagementView initialStatusFilter="all" onViewUserDetails={handleViewUserDetails} />;
+        return <UserManagementView initialStatusFilter="all" onViewUserDetails={handleViewUserDetails} onViewUserStatement={handleViewUserStatement} />;
+      case 'account_statement':
+        return (
+          <AccountStatementReportView
+            initialUid={selectedStatementUid || undefined}
+            onBack={() => setAdminTab('users_management')}
+          />
+        );
       case 'bets_management':
         return <BetManagementView />;
       case 'deposit_requests':

@@ -4827,6 +4827,13 @@ Assistant Reply:`;
       list = list.filter(u => u.status === status);
     }
 
+    // Always sort by registration date descending so newest users appear on top
+    list.sort((a, b) => {
+      const timeA = a.registrationDate ? new Date(a.registrationDate).getTime() : 0;
+      const timeB = b.registrationDate ? new Date(b.registrationDate).getTime() : 0;
+      return timeB - timeA;
+    });
+
     return res.json({ users: list });
   });
 
@@ -5208,6 +5215,386 @@ Assistant Reply:`;
         { ip: '114.143.12.8', device: 'Desktop Chrome (Windows)', time: user.registrationDate },
       ],
     });
+  });
+
+  // Helper to format friendly game names for Account Statement Report
+  const formatStatementGameName = (gameType: string): string => {
+    const g = String(gameType || '').toLowerCase();
+    if (g.includes('wingo_30') || g === 'wingo_30s') return 'Win Go 30 Sec';
+    if (g.includes('wingo_1') || g === 'wingo_1m') return 'Win Go 1 Min';
+    if (g.includes('wingo_3') || g === 'wingo_3m') return 'Win Go 3 Min';
+    if (g.includes('wingo_5') || g === 'wingo_5m') return 'Win Go 5 Min';
+    if (g.includes('aviator') || g.includes('crash')) return 'Aviator (Crash)';
+    if (g.includes('seven') || g.includes('7up')) return '7 Up 7 Down';
+    if (g.includes('teen') || g.includes('patti')) return 'Teen Patti (20-20)';
+    if (g.includes('mines')) return 'Mines (Diamond Rush)';
+    if (g.includes('roulette')) return 'European Roulette';
+    if (g.includes('chicken')) return 'Chicken Road';
+    if (g.includes('plinko')) return 'Plinko';
+    if (g.includes('ludo')) return 'Ludo Club';
+    if (g.includes('chess')) return 'Speed Chess';
+    if (g.includes('wingo')) return 'Win Go 1 Min';
+    return 'Casino / Game';
+  };
+
+  // Central Handler for Account Statement Report matching user reference screenshot
+  const handleAccountStatementReport = (rawIdentifier: string, query: any, res: any) => {
+    const allUsersList = Array.from(db.users.values()).map(u => ({
+      uid: String(u.uid || String(u.id).replace(/^u-/, '')),
+      username: u.username || u.uid,
+      phone: u.phone || '',
+      walletBalance: Number(Number(u.walletBalance || 0).toFixed(2)),
+      status: u.status || 'active',
+      registrationDate: u.registrationDate,
+    }));
+
+    // If no search UID provided, pick first user
+    let searchId = rawIdentifier.trim();
+    if (!searchId && allUsersList.length > 0) {
+      searchId = allUsersList[0].uid;
+    }
+
+    const cleanUid = searchId.replace(/^u-/, '');
+    let user = db.getUser(searchId) || db.getUser(cleanUid) || db.users.get(searchId) || db.users.get(cleanUid);
+    if (!user) {
+      user = Array.from(db.users.values()).find(u => {
+        const uUid = String(u.uid || String(u.id).replace(/^u-/, ''));
+        const uDigits = String(u.phone || '').replace(/\D/g, '');
+        const sDigits = searchId.replace(/\D/g, '');
+        return uUid === searchId || uUid === cleanUid ||
+          (u.username && u.username.toLowerCase() === searchId.toLowerCase()) ||
+          (sDigits.length >= 7 && uDigits.length >= 7 && (sDigits.endsWith(uDigits) || uDigits.endsWith(sDigits)));
+      });
+    }
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: `User ID "${searchId}" not found in database.`,
+        allUsers: allUsersList,
+      });
+    }
+
+    const targetUid = String(user.uid || String(user.id).replace(/^u-/, ''));
+    const finalWalletBalance = Number(Number(user.walletBalance || 0).toFixed(2));
+
+    // 1. Gather all activities for this user
+    interface StatementEntry {
+      id: string;
+      timestamp: number;
+      dateStr: string;
+      timeStr: string;
+      dateTimeFormatted: string;
+      credit: number | null;
+      debit: number | null;
+      closingBalance: number;
+      description: string;
+      ref: string;
+      fromTo: string;
+      category: 'game' | 'deposit' | 'withdrawal' | 'bonus' | 'adjustment';
+      gameType?: string;
+    }
+
+    const rawEntries: StatementEntry[] = [];
+    const recordedRefIds = new Set<string>();
+
+    const formatDateTime = (ts: number | string) => {
+      const d = new Date(ts);
+      if (isNaN(d.getTime())) return { dateStr: '', timeStr: '', full: String(ts) };
+      const datePart = d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      const timePart = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
+      return {
+        dateStr: datePart,
+        timeStr: timePart,
+        full: `${datePart}, ${timePart.toLowerCase()}`,
+      };
+    };
+
+    // A. Game Bets & Wins
+    const userBets = (db.bets || []).filter(b => b && (b.uid === targetUid || b.userId === targetUid || b.uid === user.uid));
+    for (const b of userBets) {
+      const betAmt = Number(b.totalAmount || b.amount || 0);
+      const betCreatedAt = b.createdAt ? new Date(b.createdAt).getTime() : Date.now();
+      const gameLabel = formatStatementGameName(b.gameType);
+      const periodLabel = b.periodId ? `Period #${b.periodId}` : 'Round';
+      const selectionLabel = b.selection !== undefined ? `Bet on ${b.selection}` : 'Wager';
+      const dt = formatDateTime(betCreatedAt);
+
+      // Debit entry: placing the bet
+      if (betAmt > 0) {
+        rawEntries.push({
+          id: `ST-BET-${b.id}`,
+          timestamp: betCreatedAt,
+          dateStr: dt.dateStr,
+          timeStr: dt.timeStr,
+          dateTimeFormatted: dt.full,
+          credit: null,
+          debit: parseFloat(betAmt.toFixed(2)),
+          closingBalance: 0,
+          description: `${gameLabel}/${periodLabel}/${selectionLabel}`,
+          ref: b.id || b.periodId || 'BET',
+          fromTo: `${user.username || targetUid} → ${gameLabel}`,
+          category: 'game',
+          gameType: b.gameType || 'casino',
+        });
+      }
+
+      // Credit entry: if won
+      if (b.status === 'won') {
+        const winPayout = Number(b.winAmount || 0);
+        if (winPayout > 0) {
+          const winTime = ((b as any).settledAt ? new Date((b as any).settledAt).getTime() : betCreatedAt + 1500);
+          const dtWin = formatDateTime(winTime);
+          rawEntries.push({
+            id: `ST-WIN-${b.id}`,
+            timestamp: winTime,
+            dateStr: dtWin.dateStr,
+            timeStr: dtWin.timeStr,
+            dateTimeFormatted: dtWin.full,
+            credit: parseFloat(winPayout.toFixed(2)),
+            debit: null,
+            closingBalance: 0,
+            description: `${gameLabel}/${periodLabel}/Win Payout (${b.multiplier || '2'}x)`,
+            ref: `WIN-${b.id || b.periodId}`,
+            fromTo: `${gameLabel} → ${user.username || targetUid}`,
+            category: 'game',
+            gameType: b.gameType || 'casino',
+          });
+        }
+      }
+    }
+
+    // B. Deposits
+    const userDeposits = (db.deposits || []).filter(d => d && (d.uid === targetUid || (d as any).userId === targetUid || d.uid === user.uid));
+    for (const d of userDeposits) {
+      const depCreatedAt = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
+      const dt = formatDateTime(depCreatedAt);
+      const depAmt = Number(d.amount || 0);
+
+      if (d.status === 'approved' && depAmt > 0) {
+        const refStr = d.utrReference || d.id;
+        recordedRefIds.add(String(d.id));
+        if (d.utrReference) recordedRefIds.add(String(d.utrReference));
+
+        rawEntries.push({
+          id: `ST-DEP-${d.id}`,
+          timestamp: depCreatedAt,
+          dateStr: dt.dateStr,
+          timeStr: dt.timeStr,
+          dateTimeFormatted: dt.full,
+          credit: parseFloat(depAmt.toFixed(2)),
+          debit: null,
+          closingBalance: 0,
+          description: `Deposit Approved via ${d.paymentMethod || 'UPI Instant'} (UTR: ${d.utrReference || '—'})`,
+          ref: refStr,
+          fromTo: `admin24712 → ${user.username || targetUid}`,
+          category: 'deposit',
+        });
+      }
+    }
+
+    // C. Withdrawals
+    const userWithdrawals = (db.withdrawals || []).filter(w => w && (w.uid === targetUid || (w as any).userId === targetUid || w.uid === user.uid));
+    for (const w of userWithdrawals) {
+      const wthCreatedAt = w.createdAt ? new Date(w.createdAt).getTime() : Date.now();
+      const dt = formatDateTime(wthCreatedAt);
+      const wthAmt = Number(w.amount || 0);
+      const destName = w.bankUpiDetails?.upiId || w.bankUpiDetails?.bankName || 'Bank/UPI';
+
+      if (wthAmt > 0) {
+        recordedRefIds.add(String(w.id));
+        rawEntries.push({
+          id: `ST-WTH-${w.id}`,
+          timestamp: wthCreatedAt,
+          dateStr: dt.dateStr,
+          timeStr: dt.timeStr,
+          dateTimeFormatted: dt.full,
+          credit: null,
+          debit: parseFloat(wthAmt.toFixed(2)),
+          closingBalance: 0,
+          description: `Withdrawal Request to ${destName} [${w.status.toUpperCase()}]`,
+          ref: w.id,
+          fromTo: `${user.username || targetUid} → ${destName}`,
+          category: 'withdrawal',
+        });
+
+        // If rejected, refund credit
+        if (w.status === 'rejected') {
+          const refundTime = wthCreatedAt + 2000;
+          const dtRef = formatDateTime(refundTime);
+          rawEntries.push({
+            id: `ST-REFUND-${w.id}`,
+            timestamp: refundTime,
+            dateStr: dtRef.dateStr,
+            timeStr: dtRef.timeStr,
+            dateTimeFormatted: dtRef.full,
+            credit: parseFloat(wthAmt.toFixed(2)),
+            debit: null,
+            closingBalance: 0,
+            description: `Withdrawal Refunded: ${w.adminNote || 'Rejected by Admin'}`,
+            ref: `REFUND-${w.id}`,
+            fromTo: `System → ${user.username || targetUid}`,
+            category: 'withdrawal',
+          });
+        }
+      }
+    }
+
+    // D. Supplementary Transactions (Bonuses, Adjustments, Commissions)
+    const userTxs = (db.transactions || []).filter(t => t && (t.uid === targetUid || (t as any).userId === targetUid || t.uid === user.uid));
+    for (const t of userTxs) {
+      if (t.reference && recordedRefIds.has(String(t.reference))) continue;
+      if (t.id && recordedRefIds.has(String(t.id))) continue;
+
+      const tTime = t.createdAt ? new Date(t.createdAt).getTime() : Date.now();
+      const dt = formatDateTime(tTime);
+      const amt = Math.abs(Number(t.amount || 0));
+
+      if (amt <= 0) continue;
+
+      const isCredit = ['bonus', 'referral', 'cashback', 'commission', 'referral_commission'].includes(t.type) ||
+        (t.type === 'adjustment' && Number(t.amount || 0) > 0);
+
+      rawEntries.push({
+        id: `ST-TX-${t.id}`,
+        timestamp: tTime,
+        dateStr: dt.dateStr,
+        timeStr: dt.timeStr,
+        dateTimeFormatted: dt.full,
+        credit: isCredit ? parseFloat(amt.toFixed(2)) : null,
+        debit: !isCredit ? parseFloat(amt.toFixed(2)) : null,
+        closingBalance: 0,
+        description: t.note || t.reference || (isCredit ? 'Bonus / Credit Credited' : 'Admin Debit Adjustment'),
+        ref: t.reference || t.id,
+        fromTo: isCredit ? `System → ${user.username || targetUid}` : `${user.username || targetUid} → System`,
+        category: (t.type === 'bonus' || t.type === 'referral_commission') ? 'bonus' : 'adjustment',
+      });
+    }
+
+    // Sort chronologically (oldest to newest) to compute running balances
+    rawEntries.sort((a, b) => a.timestamp - b.timestamp);
+
+    // Compute net deltas
+    let totalDeltas = 0;
+    for (const e of rawEntries) {
+      totalDeltas += (e.credit || 0) - (e.debit || 0);
+    }
+
+    // Baseline opening balance before all records
+    const calculatedOpeningBaseline = Math.max(0, parseFloat((finalWalletBalance - totalDeltas).toFixed(2)));
+    let currentRunning = calculatedOpeningBaseline;
+
+    for (const e of rawEntries) {
+      currentRunning = parseFloat((currentRunning + (e.credit || 0) - (e.debit || 0)).toFixed(2));
+      e.closingBalance = currentRunning;
+    }
+
+    // If there were no records, create an initial opening record
+    if (rawEntries.length === 0) {
+      const regTime = user.registrationDate ? new Date(user.registrationDate).getTime() : Date.now();
+      const dt = formatDateTime(regTime);
+      rawEntries.push({
+        id: `ST-INIT-${targetUid}`,
+        timestamp: regTime,
+        dateStr: dt.dateStr,
+        timeStr: dt.timeStr,
+        dateTimeFormatted: dt.full,
+        credit: finalWalletBalance > 0 ? finalWalletBalance : null,
+        debit: null,
+        closingBalance: finalWalletBalance,
+        description: `CRN01D${targetUid.slice(-6)} Account Active Opening Balance`,
+        ref: `CRN01D${targetUid.slice(-6)}`,
+        fromTo: `admin24712 → ${user.username || targetUid}`,
+        category: 'deposit',
+      });
+    }
+
+    // Apply Filters:
+    let filtered = [...rawEntries];
+
+    // Transaction Type Filter: 'all' | 'game' | 'deposit' | 'withdrawal' | 'bonus'
+    const txTypeFilter = String(query.transactionType || query.type || 'all').toLowerCase();
+    if (txTypeFilter !== 'all') {
+      filtered = filtered.filter(e => {
+        if (txTypeFilter === 'game' || txTypeFilter === 'bets') return e.category === 'game';
+        if (txTypeFilter === 'deposit') return e.category === 'deposit';
+        if (txTypeFilter === 'withdrawal') return e.category === 'withdrawal';
+        if (txTypeFilter === 'bonus') return e.category === 'bonus';
+        return true;
+      });
+    }
+
+    // Game Filter: 'all' | specific gameType
+    const gameFilter = String(query.gameType || query.game || 'all').toLowerCase();
+    if (gameFilter !== 'all') {
+      filtered = filtered.filter(e => {
+        if (!e.gameType) return false;
+        return e.gameType.toLowerCase().includes(gameFilter);
+      });
+    }
+
+    // Text search query
+    const searchText = String(query.search || '').trim().toLowerCase();
+    if (searchText) {
+      filtered = filtered.filter(e =>
+        e.description.toLowerCase().includes(searchText) ||
+        e.ref.toLowerCase().includes(searchText) ||
+        e.fromTo.toLowerCase().includes(searchText) ||
+        e.dateTimeFormatted.toLowerCase().includes(searchText)
+      );
+    }
+
+    // Date range filter
+    if (query.startDate) {
+      const startMs = new Date(query.startDate).getTime();
+      if (!isNaN(startMs)) {
+        filtered = filtered.filter(e => e.timestamp >= startMs);
+      }
+    }
+    if (query.endDate) {
+      const endMs = new Date(query.endDate).getTime();
+      if (!isNaN(endMs)) {
+        filtered = filtered.filter(e => e.timestamp <= endMs);
+      }
+    }
+
+    // Reverse to display newest first (matching screenshot table)
+    filtered.sort((a, b) => b.timestamp - a.timestamp);
+
+    const totalCreditInView = filtered.reduce((sum, e) => sum + (e.credit || 0), 0);
+    const totalDebitInView = filtered.reduce((sum, e) => sum + (e.debit || 0), 0);
+
+    const openingBalance = calculatedOpeningBaseline;
+    const closingBalance = finalWalletBalance;
+
+    return res.json({
+      success: true,
+      user: {
+        uid: targetUid,
+        username: user.username || targetUid,
+        phone: user.phone || '',
+        walletBalance: finalWalletBalance,
+        status: user.status || 'active',
+        registrationDate: user.registrationDate,
+      },
+      openingBalance: parseFloat(openingBalance.toFixed(2)),
+      closingBalance: parseFloat(closingBalance.toFixed(2)),
+      totalCredit: parseFloat(totalCreditInView.toFixed(2)),
+      totalDebit: parseFloat(totalDebitInView.toFixed(2)),
+      totalEntries: filtered.length,
+      entries: filtered,
+      allUsers: allUsersList,
+    });
+  };
+
+  // Account Statement Report routes
+  app.get('/api/admin/users/:uid/statement', (req, res) => {
+    return handleAccountStatementReport(req.params.uid, req.query, res);
+  });
+
+  app.get('/api/admin/account-statement', (req, res) => {
+    const rawUid = String(req.query.uid || req.query.search || req.query.userId || '').trim();
+    return handleAccountStatementReport(rawUid, req.query, res);
   });
 
   app.post('/api/admin/users/:uid/status', async (req, res) => {
@@ -6879,6 +7266,10 @@ Assistant Reply:`;
 
   // Admin Dashboard Statistics with Date & Month filtering support
   app.get('/api/admin/dashboard-stats', (req, res) => {
+    return res.json(getLiveAdminMetrics(req.query));
+  });
+
+  app.get('/api/admin/stats', (req, res) => {
     return res.json(getLiveAdminMetrics(req.query));
   });
 
